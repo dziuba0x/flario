@@ -57,10 +57,16 @@ import {
   fdcVerifySettlement,
   fdcVerifySettlementInput,
 } from "./tools/fdc-settlement.js";
+import {
+  fdcWeb2JsonRequest,
+  fdcWeb2JsonRequestInput,
+  fdcVerifyWeb2Json,
+  fdcVerifyWeb2JsonInput,
+} from "./tools/web2json.js";
 import { registerNetworkResources } from "./resources/network.js";
 
 
-export const SERVER_INFO = { name: "flario", version: "1.2.2" } as const;
+export const SERVER_INFO = { name: "flario", version: "1.3.0" } as const;
 
 export function buildServer(): McpServer {
   const server = new McpServer({ ...SERVER_INFO });
@@ -189,6 +195,20 @@ server.tool(
   "Scan the live FlareContractRegistry (Songbird by default) for Flare Confidential Compute contracts (PMW, TEE, compute extensions). Reports FCC deployment status post-STP.13 and lists FDC/Relay contracts plus the full registry.",
   songbirdFccRegistryInput,
   songbirdFccRegistry,
+);
+
+server.tool(
+  "fdc_web2json_request",
+  "Turn any public web API into a fact a smart contract can verify. Prepares an FDC Web2Json attestation request (URL + jq filter + ABI signature) through a Flare-hosted verifier and quotes the request fee. Submits on-chain only if FLARE_PRIVATE_KEY is set and submission is permitted; otherwise returns the prepared request for your own signer.",
+  fdcWeb2JsonRequestInput,
+  fdcWeb2JsonRequest,
+);
+
+server.tool(
+  "fdc_verify_web2json",
+  "Verify a Web2Json attestation AND bind it to the source you expected. Checks the Merkle proof locally against the on-chain Relay root, confirms the attested URL matches your expected host / path / protocol / method, then decodes the payload with the request's ABI signature. Without expect_source the proof is verified but NOT bound, which an attacker can exploit with a valid proof from their own endpoint.",
+  fdcVerifyWeb2JsonInput,
+  fdcVerifyWeb2Json,
 );
 
 server.tool(

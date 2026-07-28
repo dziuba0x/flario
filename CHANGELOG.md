@@ -1,36 +1,58 @@
 # Changelog
 
-## 1.2.2 — 2026-07-21 — README voice (docs only)
+## 1.3.0 (2026-07-21): prove any web fact (Web2Json), plus a hub hardening fix
+
+- **`fdc_web2json_request`** (new): turn any public web API into a fact a smart
+  contract can verify. Prepares an FDC Web2Json attestation (URL, jq filter,
+  ABI signature) through a Flare-hosted verifier, quotes the fee, and submits
+  when permitted.
+- **`fdc_verify_web2json`** (new): verifies the Merkle proof locally against the
+  on-chain Relay root **and binds it to the source you expected** (host
+  allowlist, path prefix, https, method), then decodes the payload with the
+  request's own ABI signature. Flare's guide warns that a valid proof only
+  proves the data came from the URL inside it, not that the URL is trustworthy,
+  so an unbound call is explicitly marked `source_bound: false` with a warning.
+  Binding uses a real URL parser, which closes userinfo, IDN homograph and path
+  prefix injection bypasses that string matching misses.
+- **Security fix:** on-chain attestation submission is now disabled by default in
+  hub (HTTP) mode. Previously any anonymous caller of a hosted hub could trigger
+  paid attestation requests against the operator key that exists for x402
+  settlement. stdio mode is unchanged; hub operators can opt in with
+  `FLARIO_HUB_ALLOW_SUBMIT=true`. See DECISIONS 14.
+- README gains a "Prove any web fact" section and a "Security posture" section.
+- 21 tools; 90 tests.
+
+## 1.2.2 (2026-07-21): README voice (docs only)
 
 - Rewrote the README, npm description and GitHub description in a plain,
   human voice (no em-dashes or other stylistic tells). No code changes.
 
-## 1.2.1 — 2026-07-21 — README polish (P3, docs only)
+## 1.2.1 (2026-07-21): README polish (P3, docs only)
 
 - Marketing-oriented README: added **Why Flario** (differentiators), **Examples**
   (natural-language agent asks → tools, with a real proof-carrying price output),
   and a no-client **Verify it works** quickstart. No code changes; ships the
   polished README to the npm package page too.
 
-## 1.2.0 — 2026-07-21 — Flare portfolio + agent identity (edge path P2)
+## 1.2.0 (2026-07-21): Flare portfolio + agent identity (edge path P2)
 
-- **`get_flr_stake_info`** (new): one-call "Flare portfolio" for an address —
+- **`get_flr_stake_info`** (new): one-call "Flare portfolio" for an address ,
   native FLR + wrapped WFLR, FTSO vote power and delegation (WNat/VPToken),
   claimable protocol rewards broken down by source (RewardManager
-  `getStateOfRewards` — read-only, no claim proofs needed), and FlareDrops
+  `getStateOfRewards`, read-only, no claim proofs needed), and FlareDrops
   (DistributionToDelegators, best-effort). All four networks; each section
   degrades gracefully where a contract is absent/inactive.
-- **`fassets_agent_details`** (new): human-facing agent info — name,
+- **`fassets_agent_details`** (new): human-facing agent info, name,
   description, logo/icon URL, terms-of-use URL and whitelist status from the
   AgentOwnerRegistry. Accepts an agent vault or an owner management address.
 - 19 tools; 74 tests. Live-verified on mainnet (real agent "Oracle-daemon"
   name/logo resolved; portfolio reads incl. reward source breakdown).
 
-## 1.1.0 — 2026-07-21 — proof-carrying FTSO feeds
+## 1.1.0 (2026-07-21): proof-carrying FTSO feeds
 
 Deepening enshrined-stack coverage (the "be the complete Flare MCP" track).
 
-- **`get_ftso_anchor_feed`** (new): proof-carrying FTSO Scaling price — the
+- **`get_ftso_anchor_feed`** (new): proof-carrying FTSO Scaling price, the
   value plus a Merkle proof verified **locally** against the on-chain Relay
   root (FTSO Scaling protocol id 100). Trust-minimized: an agent or a smart
   contract can rely on it without trusting the DA API. Leaf construction
@@ -38,15 +60,15 @@ Deepening enshrined-stack coverage (the "be the complete Flare MCP" track).
   and cross-confirmed against `FtsoV2Interface.verifyFeedData`. Resolves any
   feed by name (the full ~100+ anchor catalog) or `bytes21` id. All networks.
 - **`get_ftso_history`** (fixed): now works against the **public** Flare Data
-  Availability layer out of the box — no external indexer / `FLARE_DA_LAYER_API`
+  Availability layer out of the box, no external indexer / `FLARE_DA_LAYER_API`
   needed. Returns recent anchor-feed points, each optionally Merkle-verified.
   All four networks.
 - 17 tools; 70 tests (added offline anchor-feed verification fixtures).
 
-## 1.0.0 — 2026-07-21 — Flario
+## 1.0.0 (2026-07-21): Flario
 
 Project renamed from `@dziuba0x/flare-mcp` to **Flario** (npm: `flario`; command:
-`npx flario`; repo: github.com/dziuba0x/flario). Same tool, own brand — an
+`npx flario`; repo: github.com/dziuba0x/flario). Same tool, own brand, an
 agent-native MCP server for Flare with x402 payments and chain-verified receipts.
 
 - **No functional changes.** All 16 tools, both transports (stdio + HTTP hub),
@@ -58,7 +80,7 @@ agent-native MCP server for Flare with x402 payments and chain-verified receipts
   command to `npx flario`; update the mcpServers key if you used `flare-mcp`.
   The old package is deprecated with a pointer to `flario`.
 
-## 0.5.0 — 2026-07-21 — ZK-ready receipts + FDC-verified settlement
+## 0.5.0 (2026-07-21): ZK-ready receipts + FDC-verified settlement
 
 The settlement layer's organ 3: receipts, and the enshrined-FDC proof that
 makes them trust-minimized.
@@ -69,14 +91,14 @@ makes them trust-minimized.
   **Poseidon (BN254) commitment**, never in plaintext; a keccak256
   `receipt_hash` gives any holder tamper-evidence. Payers may blind the
   commitment with an optional `commitment_salt` in the payment payload (not
-  part of the EIP-712 authorization — it cannot affect fund movement).
+  part of the EIP-712 authorization, it cannot affect fund movement).
   Additive: `x402_payment_receipt` (settlement summary) is unchanged;
   `x402_receipt` is emitted alongside it on both transports.
 - **`fdc_verify_settlement`** (new tool): proves an x402 settlement via
-  Flare's **enshrined FDC** — an EVMTransaction attestation over the
+  Flare's **enshrined FDC**, an EVMTransaction attestation over the
   settlement tx, locally Merkle-verified against the on-chain Relay root, then
   *bound* to the payment (the attested tx must contain an ERC-20 Transfer of
-  the asset to the payee for ≥ the amount). Populates the receipt's
+  the asset to the payee for at least  the amount). Populates the receipt's
   `fdc_attestation_ref`, making the settlement provable without trusting the
   facilitator. Never submits on-chain itself (no gas-griefing surface).
   Live-verified end-to-end on Coston2, including rejection of mismatched
@@ -84,10 +106,10 @@ makes them trust-minimized.
 - New dependency: `poseidon-lite` (small, dependency-free Poseidon).
 - 16 tools total; 65 tests.
 
-## 0.4.0 — 2026-07-17 — hub mode (hosted HTTP + spec-style x402)
+## 0.4.0 (2026-07-17): hub mode (hosted HTTP + spec-style x402)
 
 - **`--http [port]` / `FLARE_MCP_HTTP_PORT`**: run flare-mcp as a hostable
-  service — MCP over Streamable HTTP at `POST /mcp` (stateless, all 15
+  service, MCP over Streamable HTTP at `POST /mcp` (stateless, all 15
   tools) plus REST premium endpoints paid via **standard HTTP x402**
   (`402` + `accepts[]` → `X-Payment` header → result +
   `X-Payment-Response` with the settlement tx). Wire-compatible with the
@@ -98,7 +120,7 @@ makes them trust-minimized.
   `127.0.0.1` by default, `FLARE_MCP_HTTP_HOST=0.0.0.0` to expose.
 - stdio mode unchanged and still the default.
 
-## 0.3.0 — 2026-07-17 — x402 payment layer
+## 0.3.0 (2026-07-17): x402 payment layer
 
 - **x402 payments over MCP** (`src/x402/`): paid tools reply with payment
   requirements; the client signs an EIP-3009 `TransferWithAuthorization`
@@ -109,7 +131,7 @@ makes them trust-minimized.
   Disabled by default (`X402_ENABLED=true` to enable; mainnet additionally
   behind `X402_ALLOW_MAINNET=true`). Prices per tool via env.
 - **`fassets_liquidation_scanner`** (premium): joins FAssets agent state with
-  live FTSOv2 prices — per agent: CR headroom against the collateral-type
+  live FTSOv2 prices, per agent: CR headroom against the collateral-type
   minimums, the underlying price at which liquidation starts, and the % move
   away from it.
 - **`fdc_bulk_proof_bundle`** (premium): batch retrieval of up to 20 FDC
@@ -119,32 +141,32 @@ makes them trust-minimized.
 - Payment tokens verified on-chain: mainnet USD₮0 has EIP-3009 (docs +
   functional probe); Coston2 default is a verified EIP-3009 test USDT0.
 
-## 0.2.0 — 2026-07-15
+## 0.2.0 (2026-07-15)
 
 flare-mcp v2: FDC attestation workflows, deep FAssets state, Songbird/Coston
 support, FCC registry watcher.
 
 ### Added
 
-- **`fdc_request_attestation`** — prepare an FDC attestation request
+- **`fdc_request_attestation`**, prepare an FDC attestation request
   (`Payment`, `AddressValidity`, `EVMTransaction`) via the Flare-hosted
-  verifiers, quote the request fee from `FdcRequestFeeConfigurations`, and —
-  when `FLARE_PRIVATE_KEY` is set — submit it to `FdcHub` and return the tx
+  verifiers, quote the request fee from `FdcRequestFeeConfigurations`, and ,
+  when `FLARE_PRIVATE_KEY` is set, submit it to `FdcHub` and return the tx
   hash and voting round id. Without a key, returns the prepared request for
   submission with your own signer.
-- **`fdc_get_attestation_proof`** — fetch an attestation proof from the Data
+- **`fdc_get_attestation_proof`**, fetch an attestation proof from the Data
   Availability layer and verify it **locally**: the response struct is
   ABI-encoded and keccak-hashed into a Merkle leaf, folded through the proof,
   and compared to `Relay.merkleRoots(200, round)` read on-chain. A DA-layer
   response that does not match the on-chain root is rejected.
-- **`fassets_agent_status`** — per-agent view (FXRP live on mainnet, Coston2,
+- **`fassets_agent_status`**, per-agent view (FXRP live on mainnet, Coston2,
   Songbird): collateral ratios, minting capacity in free lots,
   minted/reserved/redeeming amounts, liquidation status; sorted riskiest
   first.
-- **`fassets_system_state`** — global stats: total minted, agent count, lot
+- **`fassets_system_state`**, global stats: total minted, agent count, lot
   size, minting cap and pause flag, aggregated vault + pool collateral, and
   the redemption queue (tickets, value, lots) with pagination.
-- **`songbird_fcc_registry`** — scans the live FlareContractRegistry for
+- **`songbird_fcc_registry`**, scans the live FlareContractRegistry for
   Flare Confidential Compute contracts (PMW / TEE / compute extensions).
   Reports `not_yet_publicly_addressable` today (per dev.flare.network/fcc,
   FCC is not yet public) and will surface the contracts the moment they are
@@ -171,13 +193,13 @@ support, FCC registry watcher.
 - The server is no longer strictly read-only **only if you opt in**: setting
   `FLARE_PRIVATE_KEY` lets `fdc_request_attestation` submit transactions
   (attestation requests cost a small fee, e.g. 1000 wei on Coston2, plus
-  gas). Leave it unset for the previous read-only behaviour — every other
+  gas). Leave it unset for the previous read-only behaviour, every other
   tool remains read-only regardless.
 - New optional env vars: `FLARE_RPC_SONGBIRD`, `FLARE_RPC_COSTON`,
   `FLARE_PRIVATE_KEY`, `FDC_VERIFIER_API_KEY`, `FLARE_DA_API_KEY`,
   `FLARE_DA_URL`.
 
-## 0.1.0 — 2026-05-28
+## 0.1.0 (2026-05-28)
 
 Initial release: `get_flr_balance`, `get_ftso_feed`, `get_ftso_feeds_all`,
 `get_ftso_providers`, `get_ftso_history`, `get_fassets_status`,

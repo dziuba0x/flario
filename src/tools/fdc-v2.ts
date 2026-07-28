@@ -10,10 +10,12 @@ import { getClient, getSigner, type NetworkType } from "../utils/rpc.js";
 import { getContractAddress, getInterfaceAbi } from "../utils/contracts.js";
 import {
   ATTESTATION_TYPES,
+  VERIFIABLE_TYPES,
   SOURCE_CHAINS,
   TYPE_SOURCES,
   FDC_PROTOCOL_ID,
   type AttestationType,
+  type VerifiableType,
   type SourceChain,
   prepareAttestationRequest,
   fetchProofFromDaLayer,
@@ -22,6 +24,7 @@ import {
   foldMerkleProof,
   daLayerBase,
 } from "../utils/fdc.js";
+import { isSubmitAllowed, SUBMIT_BLOCKED_REASON } from "../utils/runtime.js";
 
 const ZERO_BYTES32 =
   "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -93,12 +96,14 @@ export async function fdcRequestAttestation(args: {
     const fdcHubAddress = getAddress(await getContractAddress("FdcHub", network));
 
     const signer = getSigner(network);
-    if (!signer) {
+    if (!signer || !isSubmitAllowed()) {
       // Read-only mode: return everything needed to submit the request with
       // the user's own signer. No key, no transaction.
       return toolResult({
         mode: "prepared_only",
-        note: "No FLARE_PRIVATE_KEY configured, so the request was prepared but not submitted. Submit abi_encoded_request to FdcHub.requestAttestation with value = request_fee_wei, or set FLARE_PRIVATE_KEY to let this tool submit it.",
+        note: !signer
+          ? "No FLARE_PRIVATE_KEY configured, so the request was prepared but not submitted. Submit abi_encoded_request to FdcHub.requestAttestation with value = request_fee_wei, or set FLARE_PRIVATE_KEY to let this tool submit it."
+          : SUBMIT_BLOCKED_REASON,
         attestation_type,
         source_chain,
         network,
@@ -208,9 +213,9 @@ export async function retrieveAndVerifyProof(
   const typeName = Buffer.from(typeHex.slice(2), "hex")
     .toString("utf8")
     .replace(/\0+$/, "");
-  if (!(ATTESTATION_TYPES as readonly string[]).includes(typeName)) {
+  if (!(VERIFIABLE_TYPES as readonly string[]).includes(typeName)) {
     throw new Error(
-      `DA layer returned attestation type "${typeName}", which this tool cannot verify locally (supported: ${ATTESTATION_TYPES.join(", ")}).`,
+      `DA layer returned attestation type "${typeName}", which this tool cannot verify locally (supported: ${VERIFIABLE_TYPES.join(", ")}).`,
     );
   }
 
@@ -218,7 +223,7 @@ export async function retrieveAndVerifyProof(
   // through the sorted-pair Merkle proof, must equal the Relay root.
   // This removes trust in the DA layer response.
   const responseAbi = responseAbiParameter(
-    typeName as AttestationType,
+    typeName as VerifiableType,
     network,
   );
   const leaf = computeResponseLeaf(responseAbi, daProof.response);

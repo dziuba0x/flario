@@ -172,6 +172,53 @@ On-chain receipt-hash anchoring was **deferred** (would add one tx per call,
 doubling gas on sub-cent pricing); the anchor today is the settlement tx hash,
 and the FDC attestation becomes the enshrined anchor once that path lands.
 
+## 14. Hub mode must not let strangers spend the operator key (found 2026-07-21)
+
+Found while building the Web2Json request tool, and it applies to the existing
+`fdc_request_attestation` too. An attestation request costs a fee plus gas. In
+hub (HTTP) mode the operator sets `FLARE_PRIVATE_KEY` for a completely
+different reason (settling x402 payments), and all tools are exposed over
+`POST /mcp` to whoever can reach the port. So any anonymous caller could have
+triggered unlimited paid on-chain submissions and drained the operator's funds.
+
+Fix: `src/utils/runtime.ts` tracks the runtime posture. stdio mode keeps the old
+behaviour (you are the only caller, so it is your own gas by definition). Hub
+mode refuses on-chain submission and returns the prepared request instead,
+unless the operator explicitly opts in with `FLARIO_HUB_ALLOW_SUBMIT=true`.
+Both request tools honour it. This mirrors the same reasoning already used in
+§10 for `fdc_verify_settlement`, which never submits at all.
+
+## 13. Web2Json: verify AND bind the source (P-flagship, 2026-07-21)
+
+`Web2Json` turns any public web API into a fact a contract can verify, which is
+the single most general capability FDC offers. Resolved empirically first:
+the verifier route is `/verifier/web2/Web2Json/prepareRequest`, the source id is
+the fixed string `PublicWeb2` on every network (no `test` prefix, unlike the
+chain-sourced types, so it needed its own prepare helper), and the request body
+is `{url, httpMethod, headers, queryParams, body, postProcessJq, abiSignature}`.
+Confirmed VALID live against the testnet verifier before any code was written.
+
+The important part is the security model. Flare's own guide
+(https://dev.flare.network/fdc/guides/url-parsing-security) states plainly that
+"a valid FDC proof only guarantees the data came from the URL in the proof. It
+does not guarantee the URL is trustworthy." A Merkle-valid proof for an
+attacker's own endpoint is trivially obtainable. So `fdc_verify_web2json` takes
+an optional `expect_source` (hosts allowlist, path prefix, https, method) and
+rejects a valid proof whose attested URL does not match. Without
+`expect_source` the response is explicitly marked `source_bound: false` with a
+warning rather than silently looking trustworthy.
+
+Binding uses the WHATWG `URL` parser instead of the string prefix matching the
+Solidity guide has to use on-chain. That closes three bypasses that naive
+matching misses, each with a test: userinfo
+(`https://api.trusted.com@evil.com/`, real host is evil.com), IDN homographs
+(Cyrillic lookalikes normalise to punycode and therefore fail exact match), and
+path prefix injection (`/evil/api/v3/...` contains but does not start with the
+expected path). Host comparison is case-insensitive because DNS is.
+
+Verified end-to-end live on Coston2: submit, finalize, verify, bind, decode,
+plus negative cases (wrong host, wrong path prefix) rejected.
+
 ## 12. Proof-carrying FTSO anchor feeds (P1, 2026-07-21)
 
 Edge-path P1: make FTSO trust-minimized. FTSO Scaling anchor feeds are published

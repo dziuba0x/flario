@@ -49,7 +49,7 @@ describe("hub HTTP endpoints", () => {
     expect(res.status).toBe(200);
   });
 
-  it("lists all 19 tools over MCP Streamable HTTP", async () => {
+  it("lists all 21 tools over MCP Streamable HTTP", async () => {
     const res = await fetch(`${BASE}/mcp`, {
       method: "POST",
       headers: {
@@ -60,7 +60,7 @@ describe("hub HTTP endpoints", () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { result: { tools: Array<{ name: string }> } };
-    expect(body.result.tools.length).toBe(19);
+    expect(body.result.tools.length).toBe(21);
     const names = body.result.tools.map((t) => t.name);
     expect(names).toContain("fassets_liquidation_scanner");
     expect(names).toContain("fdc_request_attestation");

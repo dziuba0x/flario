@@ -19,12 +19,28 @@ import type { NetworkType } from "./rpc.js";
 // Source: https://dev.flare.network/fdc/overview
 export const FDC_PROTOCOL_ID = 200;
 
+// Chain-sourced attestation types (they take a source blockchain).
 export const ATTESTATION_TYPES = [
   "Payment",
   "AddressValidity",
   "EVMTransaction",
 ] as const;
 export type AttestationType = (typeof ATTESTATION_TYPES)[number];
+
+// Web2Json is not chain-sourced: its source is the public web, and its source
+// id is the same string on every network (no "test" prefix).
+// Source: https://dev.flare.network/fdc/attestation-types/web2-json
+export const WEB2JSON_TYPE = "Web2Json" as const;
+export const WEB2JSON_SOURCE_ID = "PublicWeb2" as const;
+const WEB2JSON_VERIFIER_PATH = "web2";
+
+// Every type whose proof this server can verify locally (chain-sourced plus
+// Web2Json). IFdcVerification exposes a verify<Type> function for each.
+export const VERIFIABLE_TYPES = [
+  ...ATTESTATION_TYPES,
+  WEB2JSON_TYPE,
+] as const;
+export type VerifiableType = (typeof VERIFIABLE_TYPES)[number];
 
 export const SOURCE_CHAINS = ["xrp", "btc", "doge", "eth", "flr", "sgb"] as const;
 export type SourceChain = (typeof SOURCE_CHAINS)[number];
@@ -164,6 +180,47 @@ export async function prepareAttestationRequest(
   return (await res.json()) as PreparedRequest;
 }
 
+export interface Web2JsonRequestBody {
+  url: string;
+  httpMethod: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  headers: string;
+  queryParams: string;
+  body: string;
+  postProcessJq: string;
+  abiSignature: string;
+}
+
+/**
+ * Ask a Flare-hosted verifier to validate a Web2Json request and produce the
+ * abiEncodedRequest. Web2Json has its own verifier route and a fixed source id
+ * ("PublicWeb2"), so it does not go through the chain-sourced helper above.
+ */
+export async function prepareWeb2JsonRequest(
+  requestBody: Web2JsonRequestBody,
+  network: NetworkType,
+): Promise<PreparedRequest> {
+  const url = `${VERIFIER_BASE[network]}/verifier/${WEB2JSON_VERIFIER_PATH}/${WEB2JSON_TYPE}/prepareRequest`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "X-API-KEY": verifierApiKey(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      attestationType: encodeAttestationName(WEB2JSON_TYPE),
+      sourceId: encodeAttestationName(WEB2JSON_SOURCE_ID),
+      requestBody,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      `Verifier prepareRequest failed (HTTP ${res.status}) at ${url}: ${text.slice(0, 300)}`,
+    );
+  }
+  return (await res.json()) as PreparedRequest;
+}
+
 export interface DaProofResponse {
   response: {
     attestationType: Hex;
@@ -239,7 +296,7 @@ export async function fetchProofFromDaLayer(
  * of { bytes32[] merkleProof, Response data }).
  */
 export function responseAbiParameter(
-  type: AttestationType,
+  type: VerifiableType,
   network: NetworkType,
 ): AbiParameter {
   const abi = getInterfaceAbi("IFdcVerification", network);

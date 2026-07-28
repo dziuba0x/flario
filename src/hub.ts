@@ -27,6 +27,7 @@ import {
   bulkProofBundleCore,
 } from "./tools/premium.js";
 import type { NetworkType } from "./utils/rpc.js";
+import { setHubMode } from "./utils/runtime.js";
 
 const NETWORKS = ["mainnet", "coston2", "songbird", "coston"] as const;
 
@@ -201,7 +202,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       description:
         "Flario hub — Flare Network data + payments for AI agents. MCP over Streamable HTTP at POST /mcp; premium REST endpoints paid via x402 (EIP-3009 on Flare).",
       endpoints: {
-        mcp: "POST /mcp (MCP Streamable HTTP, stateless; all 19 tools)",
+        mcp: "POST /mcp (MCP Streamable HTTP, stateless; all 21 tools)",
         liquidation_scanner:
           "GET /api/premium/liquidation-scanner?asset=FXRP&network=mainnet&max_agents=50",
         proof_bundle:
@@ -294,6 +295,9 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 export async function startHub(
   port: number,
 ): Promise<ReturnType<typeof createServer>> {
+  // Anonymous callers may reach this process, so on-chain submission is
+  // denied unless the operator explicitly opted in. See utils/runtime.ts.
+  setHubMode(true);
   const host = process.env.FLARIO_HTTP_HOST ?? "127.0.0.1";
   const server = createServer((req, res) => {
     route(req, res).catch((err) => {

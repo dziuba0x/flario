@@ -17,7 +17,7 @@ Flario covers the whole enshrined stack: FTSO prices (including proof-carrying a
 
 ## Why Flario
 
-- **It goes deep on the protocols that are built into Flare.** FTSO, FDC, and FAssets are enshrined in the chain, and so are Flario's 19 tools. A generic multi-chain MCP server can't reach any of this, and the depth doesn't port to another chain.
+- **It goes deep on the protocols that are built into Flare.** FTSO, FDC, and FAssets are enshrined in the chain, and so are Flario's 21 tools. A generic multi-chain MCP server can't reach any of this, and the depth doesn't port to another chain.
 - **Answers carry a proof, so you don't have to take my word for it.** Prices and cross-chain facts come with a Merkle proof that Flario checks locally against the on-chain root. An agent, or even a smart contract, can rely on the answer without trusting any API.
 - **Agents can pay, and they get a receipt.** Premium tools settle per call over [x402](https://www.x402.org/) on Flare, and each payment returns a portable receipt that Flare's own FDC can prove, not just the facilitator's word for it. No other chain in the x402 ecosystem can do that today.
 - **Self-hostable, no custody.** It runs on public RPCs, asks for no account or key to read data, and never touches your funds.
@@ -35,6 +35,7 @@ Once Flario is in your MCP client (see [Install](#install)), you just ask in pla
 | "Show the FLR portfolio for `0x...`: balance, delegation, claimable rewards." | `get_flr_stake_info` |
 | "Who runs FXRP agent `0x...`?" | `fassets_agent_details` |
 | "Prove this settlement actually happened, using Flare's FDC." | `fdc_verify_settlement` |
+| "Put this API's data on-chain with a proof, and only accept it from the host I trust." | `fdc_web2json_request` then `fdc_verify_web2json` |
 
 A proof-carrying price comes back with the value and a proof the agent can verify on its own (trimmed):
 
@@ -95,7 +96,7 @@ The same block works in any MCP client with stdio support (VS Code, Windsurf, Ze
 ### Check it works (no client, ~10 s)
 
 ```bash
-# List all 19 tools straight from the published package:
+# List all 21 tools straight from the published package:
 npx -y @modelcontextprotocol/inspector --cli npx -y flario --method tools/list
 
 # Or call one, a proof-carrying FLR/USD price on mainnet:
@@ -108,7 +109,7 @@ npx -y @modelcontextprotocol/inspector --cli npx -y flario \
 
 ## Tools
 
-Every tool validates its input with [zod](https://zod.dev) and returns a clear error instead of crashing when an RPC call or data source is down. Seventeen tools are free. The two premium tools settle via [x402 on Flare](#how-payments-work-x402) when the operator turns it on, and are free otherwise.
+Every tool validates its input with [zod](https://zod.dev) and returns a clear error instead of crashing when an RPC call or data source is down. Nineteen tools are free. The two premium tools settle via [x402 on Flare](#how-payments-work-x402) when the operator turns it on, and are free otherwise.
 
 | Tool | Networks | Tier | What it does |
 | --- | --- | --- | --- |
@@ -129,6 +130,8 @@ Every tool validates its input with [zod](https://zod.dev) and returns a clear e
 | `fassets_agent_details` | mainnet, coston2, songbird | Free | Agent name, description, logo, terms of use, whitelist status (AgentOwnerRegistry) |
 | `songbird_fcc_registry` | songbird (default), all | Free | Scan the live contract registry for Flare Confidential Compute (PMW, TEE) deployments |
 | `fdc_verify_settlement` | mainnet, coston2, songbird, coston | Free | Prove an x402 settlement via enshrined FDC (EVMTransaction attestation) and bind it to the payment |
+| `fdc_web2json_request` | mainnet, coston2, songbird, coston | Free | Turn any public web API into a verifiable fact: URL plus jq filter plus ABI signature, prepared through a Flare verifier |
+| `fdc_verify_web2json` | mainnet, coston2, songbird, coston | Free | Verify a Web2Json proof locally AND bind it to the source you expected, then decode the payload |
 | `fassets_liquidation_scanner` | mainnet, coston2, songbird | Premium (x402) | FAssets agents joined with live FTSO prices: per-agent liquidation price and how far away it is |
 | `fdc_bulk_proof_bundle` | mainnet, coston2, songbird, coston | Premium (x402) | Batch fetch and local verification of up to 20 FDC proofs |
 
@@ -174,6 +177,79 @@ The built-in facilitator never holds funds. `transferWithAuthorization` moves th
 
 Every paid call returns a portable `x402_receipt`. It's a fixed-schema, self-describing record where the payer shows up only as a Poseidon commitment, never in plaintext, with a keccak256 `receipt_hash` any holder can recompute to check for tampering. A payer can blind the commitment with an optional `commitment_salt` in the payment payload. Full spec: [`RECEIPT_SPEC.md`](RECEIPT_SPEC.md).
 
+---
+
+## Prove any web fact (Web2Json)
+
+FDC's `Web2Json` type fetches JSON from a URL, runs a jq filter over it, and returns ABI-encoded data. That means any public API can become a fact a smart contract is able to check. Flario wraps the whole loop for an agent:
+
+```text
+1. fdc_web2json_request  (url + post_process_jq + abi_signature)
+     -> a Flare verifier validates it and quotes the fee
+     -> submit to FdcHub (your key), get a voting round id
+2. wait ~90 to 180 s for the round to finalize
+3. fdc_verify_web2json  (voting_round_id + abi_encoded_request + expect_source)
+     -> Merkle proof checked locally against Relay.merkleRoots(200, round)
+     -> attested URL bound to the source you expected
+     -> payload decoded with the request's own ABI signature
+```
+
+### Why `expect_source` matters
+
+Flare's own guide is blunt about the trap ([URL parsing security](https://dev.flare.network/fdc/guides/url-parsing-security)):
+
+> A valid FDC proof only guarantees the data came from the URL in the proof. It does not guarantee the URL is trustworthy.
+
+So a proof that passes Merkle verification is only half the story. An attacker can stand up their own endpoint, get a completely valid attestation for it, and hand you that proof. `fdc_verify_web2json` therefore does both jobs: it verifies the proof, and it binds the proof to the source you actually meant to use.
+
+```json
+{
+  "expect_source": {
+    "hosts": ["api.coingecko.com"],
+    "path_prefix": "/api/v3/simple/price",
+    "require_https": true,
+    "http_method": "GET"
+  }
+}
+```
+
+If the attested URL does not match, the call fails loudly even though the cryptography is fine. Leave `expect_source` out and you still get the proof, but the response is marked `source_bound: false` with a warning, because that is the path an attacker can walk through.
+
+Binding uses a real URL parser instead of string prefix matching, which closes three bypasses that naive checks miss:
+
+| Attack | Looks like | Why prefix matching fails |
+| --- | --- | --- |
+| Userinfo | `https://api.coingecko.com@evil.com/price` | Starts with the trusted string, but the host is `evil.com` |
+| Homograph | `https://аpi.coingecko.com/price` (Cyrillic а) | Visually identical, different host |
+| Path injection | `https://api.coingecko.com/evil/api/v3/simple/price` | Contains the expected path, does not start with it |
+
+Each of these has a test in `test/web2json.test.ts`.
+
+Here is a real verified response from Coston2, using the same API Flare's own Web2Json guide uses (trimmed):
+
+```json
+{
+  "verified": true,
+  "source_bound": true,
+  "verification": "Two checks passed. The Merkle proof folds to Relay.merkleRoots(200, round) read on-chain, and the attested request matches the source you expected (protocol, host, path, method).",
+  "voting_round_id": 1409295,
+  "source": {
+    "url": "https://swapi.info/api/people/3",
+    "http_method": "GET",
+    "parsed": { "protocol": "https", "host": "swapi.info", "path": "/api/people/3" }
+  },
+  "data": { "name": "R2-D2", "height": "96", "mass": "32" }
+}
+```
+
+Ask for the same proof while expecting a different host and the call fails on purpose, even though the cryptography is perfectly valid:
+
+```text
+The FDC proof is VALID (Merkle-verified against the on-chain Relay root) but it
+does NOT come from the source you expected: attested host "swapi.info" is not in
+the expected list (api.coingecko.com). Treat this data as untrusted.
+```
+
 ### FDC-verified settlement (the part I'm proudest of)
 
 A receipt claims a payment settled. Flare can prove it did, using the chain's own enshrined data connector. `fdc_verify_settlement` takes a settlement tx, gets an FDC EVMTransaction attestation over it, verifies the Merkle proof locally against the on-chain Relay root, and then binds the attestation to the payment: it confirms the attested transaction really contains an ERC-20 `Transfer` of the asset to the payee for at least the amount. The result is a receipt whose `fdc_attestation_ref` makes the settlement provable without trusting the facilitator. No other chain in the x402 ecosystem produces a protocol-level receipt like this. The tool never submits a transaction itself (the attestation request is permissionless, so the holder submits it), which means a hosted hub can't be tricked into burning gas.
@@ -205,7 +281,7 @@ FLARIO_HTTP_HOST=0.0.0.0 npx flario --http 8402
 
 | Endpoint | What it serves |
 | --- | --- |
-| `POST /mcp` | The full MCP server over Streamable HTTP (stateless), all 19 tools, x402 in-band |
+| `POST /mcp` | The full MCP server over Streamable HTTP (stateless), all 21 tools, x402 in-band |
 | `GET /api/premium/liquidation-scanner?asset=FXRP&network=mainnet` | HTTP x402: `402` plus `accepts[]`, retry with the `X-Payment` header, get the result plus `X-Payment-Response` |
 | `POST /api/premium/proof-bundle` | Same x402 flow. Body: `{"requests":[{"voting_round_id":N,"abi_encoded_request":"0x..."}],"network":"..."}` |
 | `GET /` | Discovery: endpoints, x402 config, pricing |
@@ -241,7 +317,8 @@ Everything here is optional. The server runs against the public RPCs and Flare-h
 | `FLARE_RPC_TESTNET` | all Coston2 calls | Override the Coston2 RPC endpoint. |
 | `FLARE_RPC_SONGBIRD` | all Songbird calls | Override the Songbird RPC endpoint. |
 | `FLARE_RPC_COSTON` | all Coston calls | Override the Coston RPC endpoint. |
-| `FLARE_PRIVATE_KEY` | `fdc_request_attestation` | Local signing key for submitting attestation requests. Never logged, never leaves the process except as a signed tx. Leave it out for prepared-only mode. |
+| `FLARE_PRIVATE_KEY` | `fdc_request_attestation`, `fdc_web2json_request` | Local signing key for submitting attestation requests. Never logged, never leaves the process except as a signed tx. Leave it out for prepared-only mode. |
+| `FLARIO_HUB_ALLOW_SUBMIT` | hub mode | Allow on-chain attestation submission in hub mode. Off by default so an anonymous caller cannot spend the operator's gas. See [Security posture](#security-posture). |
 | `FDC_VERIFIER_API_KEY` | `fdc_request_attestation` | Verifier API key. Defaults to the public key `00000000-0000-0000-0000-000000000000`. |
 | `FLARE_DA_API_KEY` | `fdc_get_attestation_proof` | DA-layer API key. Defaults to the public key. |
 | `FLARE_DA_URL` | `fdc_get_attestation_proof` | Override the DA-layer base URL (for example a self-hosted instance). |
@@ -254,6 +331,22 @@ Everything here is optional. The server runs against the public RPCs and Flare-h
 | `FLARE_METRICS_API` | `get_fassets_status` | Optional fallback metrics API, used only if the on-chain read fails. |
 
 See [`.env.example`](.env.example) for a copy-paste template.
+
+---
+
+## Security posture
+
+This thing touches money, so the defaults lean paranoid.
+
+- **No custody, anywhere.** Flario never holds or forwards funds. x402 settlement moves tokens straight from payer to payee inside `transferWithAuthorization`; the operator key only pays gas to broadcast an authorization the client already signed.
+- **Verify, then bind.** Every proof-consuming tool does two things, not one. A Merkle proof that checks out is necessary but not sufficient, so `fdc_verify_settlement` binds the attestation to the actual ERC-20 `Transfer`, and `fdc_verify_web2json` binds it to the source you expected. A valid proof for the wrong thing is rejected with a precise reason.
+- **Submission is off by default in hub mode.** In stdio mode you are the only caller, so spending your own gas on an attestation request is what you asked for. In hub mode anyone who reaches the port is a caller, and the operator key exists to settle x402 payments, so letting a stranger trigger paid on-chain requests would drain it. Hub mode therefore refuses on-chain submission and returns the prepared request instead, unless the operator sets `FLARIO_HUB_ALLOW_SUBMIT=true`.
+- **Keys stay local.** `FLARE_PRIVATE_KEY` is read from the environment, used to sign in-process, and never logged or transmitted anywhere except as an already-signed transaction to the RPC you configured.
+- **Replay protection is doubled.** EIP-3009 nonces are consumed on-chain, and settled nonces are also cached in-process to close the window between broadcast and on-chain visibility.
+- **No per-user data is collected or stored.** There is no analytics, no database, no transaction-graph logging. Receipts belong to whoever holds them.
+- **Contract addresses are never hardcoded.** They resolve at runtime through the Flare `ContractRegistry`, and every protocol constant in the source cites the Flare doc it came from.
+
+Found something? Open an issue, or reach me privately if it's sensitive.
 
 ---
 

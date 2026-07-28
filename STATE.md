@@ -12,17 +12,27 @@ DECISIONS §11. "Flare"/"MCP" kept in tagline+keywords for discovery.
 
 ## Snapshot
 
-- Package: **`flario` — v1.2.0** on npm (bare name); repo public at
+- Package: **`flario` v1.3.0** on npm (bare name); repo public at
   github.com/dziuba0x/flario; git tree clean.
-- Tests: 74 passing (vitest, recorded fixtures + hub integration). `npm test` green.
-- Tools: 19 (17 free + 2 premium). Transports: stdio (default) and hub mode
+- Tests: 90 passing (vitest, recorded fixtures + hub integration). `npm test` green.
+- Tools: 21 (19 free + 2 premium). Transports: stdio (default) and hub mode
   (`--http`, MCP Streamable HTTP + spec-style x402 REST).
-- Strategy: EDGE path (be THE complete Flare MCP). P1 DONE (proof-carrying FTSO
-  anchor feeds + fixed history, DECISIONS §12). P2 DONE = `get_flr_stake_info`
-  (portfolio: FLR/WFLR, vote power, delegation, claimable rewards by source via
-  RewardManager.getStateOfRewards, FlareDrops) + `fassets_agent_details`
-  (name/logo/terms via AgentOwnerRegistry). Next: P3 = README quickstart +
-  demo GIF/asciinema (GitHub is the only marketing).
+- Strategy: EDGE path (be THE complete Flare MCP), then the proof-carrying moat.
+  P1 DONE (proof-carrying FTSO anchor feeds + fixed history, DECISIONS 12).
+  P2 DONE (`get_flr_stake_info` portfolio + `fassets_agent_details`).
+  P3 DONE (README as a landing page, human voice, no AI tells).
+  FLAGSHIP DONE: Web2Json (`fdc_web2json_request` + `fdc_verify_web2json`),
+  which turns any public web API into a contract-verifiable fact and BINDS the
+  proof to an expected source (DECISIONS 13). Plus a real security fix: hub mode
+  no longer lets anonymous callers spend the operator key (DECISIONS 14).
+- Architecture decision (operator, 2026-07-21): everything "an agent doing
+  something with Flare" lives in Flario as more tools, including FCC when it
+  lands. Passport/reputation and marketplace stay separate future projects built
+  on Flario's receipts. Do not fragment the brand.
+- FCC watch: `songbird_fcc_registry` reports 0 FCC contracts on all four
+  networks as of 2026-07-21, but flare-foundation is actively pushing
+  `tee-proxy`, `tee-node`, `fce-extension-scaffold`. When contracts appear
+  on-chain, being first with an agent interface to FCC is the next big move.
 - Live-verified on-chain (Coston2): FDC full cycle (own attestation, round
   1397964), x402 settlement over MCP (tx 0x19eb…a7dd) and over HTTP
   (tx 0xf230…cab2, replay rejected).
