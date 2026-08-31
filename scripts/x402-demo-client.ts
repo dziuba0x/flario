@@ -46,7 +46,7 @@ const transport = new StdioClientTransport({
 });
 const client = new Client({ name: "x402-demo-agent", version: "0.1.0" });
 await client.connect(transport);
-process.stdout.write(`agent: connected to flare-mcp, payer = ${payer.address}\n\n`);
+process.stdout.write(`agent: connected to flario, payer = ${payer.address}\n\n`);
 
 // 1. Call the paid tool with no payment → expect x402 requirements.
 process.stdout.write(`agent: calling ${PAID_TOOL} (unpaid)...\n`);

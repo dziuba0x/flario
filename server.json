@@ -1,0 +1,43 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.dziuba0x/flario",
+  "title": "Flario — Flare Network",
+  "description": "Give an agent proof-carrying access to Flare: FTSO prices with a Merkle proof verified locally against the on-chain root, FDC cross-chain attestations, FAssets state, and x402 payments that settle on the same chain they serve.",
+  "version": "1.4.0",
+  "websiteUrl": "https://github.com/dziuba0x/flario#readme",
+  "repository": {
+    "url": "https://github.com/dziuba0x/flario",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "flario",
+      "version": "1.4.0",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "FLARE_RPC",
+          "description": "Flare mainnet C-chain RPC. Defaults to the public endpoint https://flare-api.flare.network/ext/C/rpc.",
+          "isRequired": false
+        },
+        {
+          "name": "FLARE_RPC_TESTNET",
+          "description": "Coston2 testnet RPC. Defaults to the public endpoint https://coston2-api.flare.network/ext/C/rpc.",
+          "isRequired": false
+        },
+        {
+          "name": "FLARE_PRIVATE_KEY",
+          "description": "Only needed to submit FDC attestation requests on-chain or to broadcast an x402 settlement. Every read tool works without it.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "X402_ENABLED",
+          "description": "Set to true to turn on the x402 paywall for the two premium tools. Off by default, so premium tools are free.",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,108 +1,139 @@
-// Smart Accounts tools: get_smart_account_info
+// Smart Accounts tool: get_smart_account_info
+//
+// Every XRPL account maps deterministically to a Flare address through the
+// MasterAccountController, whether or not that account has actually been
+// deployed yet. Both directions are real view functions in the official
+// periphery artifacts:
+//
+//   getPersonalAccount(string xrplOwner) -> address
+//   isSmartAccount(address)              -> (bool, string xrplOwner)
+//
+// An earlier version guessed at a `getFlareAddress` function that does not
+// exist and degraded to a "coming soon" placeholder. This reads the published
+// interface instead, so the tool returns a real answer.
 import { z } from "zod";
-import { getAddress, type Address } from "viem";
+import { getAddress, isAddress, type Address } from "viem";
 import { getClient, type NetworkType } from "../utils/rpc.js";
-import { getContractAddress } from "../utils/contracts.js";
-
-// Each XRPL account maps deterministically to a Flare address via the
-// MasterAccountController. The exact ABI is not yet published in the periphery
-// artifacts, so we try the most likely view function and fall back to a
-// placeholder response when it is unavailable.
-const MASTER_ACCOUNT_CONTROLLER_ABI = [
-  {
-    name: "getFlareAddress",
-    type: "function",
-    stateMutability: "view",
-    inputs: [{ name: "_xrplAddress", type: "string" }],
-    outputs: [{ type: "address" }],
-  },
-] as const;
+import { getContractAddress, getInterfaceAbi } from "../utils/contracts.js";
 
 const ZERO_ADDRESS: Address = "0x0000000000000000000000000000000000000000";
 
 export const getSmartAccountInfoInput = {
-  xrpl_address: z.string().startsWith("r"),
+  xrpl_address: z
+    .string()
+    .startsWith("r")
+    .optional()
+    .describe("XRPL account (r...). Resolves forward to its Flare address."),
+  flare_address: z
+    .string()
+    .startsWith("0x")
+    .optional()
+    .describe("Flare address (0x...). Resolves backward to its XRPL owner."),
   network: z.enum(["mainnet", "coston2"]),
 };
 
 export async function getSmartAccountInfo(args: {
-  xrpl_address: string;
+  xrpl_address?: string;
+  flare_address?: string;
   network: NetworkType;
 }) {
-  const { xrpl_address, network } = args;
-  try {
-    const client = getClient(network);
+  const { xrpl_address, flare_address, network } = args;
 
-    let controller: Address;
-    try {
-      controller = getAddress(
-        await getContractAddress("MasterAccountController", network),
-      );
-    } catch {
-      controller = ZERO_ADDRESS;
-    }
-
-    if (controller === ZERO_ADDRESS) {
-      const result = {
-        xrpl_address,
-        flare_address: null,
-        has_account: false,
-        network,
-        note: "Smart Accounts query coming soon — MasterAccountController is not yet resolvable on this network.",
-      };
-      return {
-        content: [
-          { type: "text" as const, text: JSON.stringify(result, null, 2) },
-        ],
-      };
-    }
-
-    let flareAddress: Address;
-    try {
-      flareAddress = getAddress(
-        (await client.readContract({
-          address: controller,
-          abi: MASTER_ACCOUNT_CONTROLLER_ABI,
-          functionName: "getFlareAddress",
-          args: [xrpl_address],
-        })) as string,
-      );
-    } catch {
-      const result = {
-        xrpl_address,
-        flare_address: null,
-        has_account: false,
-        network,
-        controller,
-        note: "Smart Accounts query coming soon — getFlareAddress is unavailable on the MasterAccountController ABI.",
-      };
-      return {
-        content: [
-          { type: "text" as const, text: JSON.stringify(result, null, 2) },
-        ],
-      };
-    }
-
-    const mapped = flareAddress !== ZERO_ADDRESS;
-    let hasAccount = false;
-    if (mapped) {
-      const code = await client.getCode({ address: flareAddress });
-      hasAccount = code !== undefined && code !== "0x";
-    }
-
-    const result = {
-      xrpl_address,
-      flare_address: mapped ? flareAddress : null,
-      has_account: hasAccount,
-      network,
-      controller,
-    };
-
+  if (!xrpl_address && !flare_address) {
     return {
+      isError: true,
       content: [
-        { type: "text" as const, text: JSON.stringify(result, null, 2) },
+        {
+          type: "text" as const,
+          text: "Pass either xrpl_address (r...) to resolve forward, or flare_address (0x...) to resolve backward.",
+        },
       ],
     };
+  }
+
+  try {
+    const client = getClient(network);
+    const controller = getAddress(
+      await getContractAddress("MasterAccountController", network),
+    );
+    const abi = getInterfaceAbi("IMasterAccountController", network);
+
+    const sourceId = (await client.readContract({
+      address: controller,
+      abi,
+      functionName: "getSourceId",
+    })) as `0x${string}`;
+
+    // Reverse: Flare address -> XRPL owner.
+    if (flare_address) {
+      if (!isAddress(flare_address)) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `"${flare_address}" is not a valid EVM address.`,
+            },
+          ],
+        };
+      }
+      const address = getAddress(flare_address);
+      const [isSmartAccount, xrplOwner] = (await client.readContract({
+        address: controller,
+        abi,
+        functionName: "isSmartAccount",
+        args: [address],
+      })) as [boolean, string];
+
+      return json({
+        query: "reverse",
+        flare_address: address,
+        is_smart_account: isSmartAccount,
+        xrpl_owner: isSmartAccount ? xrplOwner : null,
+        network,
+        controller,
+        source_id: decodeSourceId(sourceId),
+        note: isSmartAccount
+          ? "This address is a deployed Smart Account controlled by the XRPL owner above."
+          : "This address is not a Smart Account. It is an ordinary EVM address as far as the MasterAccountController is concerned.",
+      });
+    }
+
+    // Forward: XRPL account -> deterministic Flare address.
+    const personalAccount = (await client.readContract({
+      address: controller,
+      abi,
+      functionName: "getPersonalAccount",
+      args: [xrpl_address as string],
+    })) as string;
+
+    const mapped =
+      personalAccount && getAddress(personalAccount) !== ZERO_ADDRESS
+        ? getAddress(personalAccount)
+        : null;
+
+    // The mapping is deterministic and exists before deployment, so a non-zero
+    // address does NOT mean the account is live on-chain. Bytecode does.
+    let deployed = false;
+    if (mapped) {
+      const code = await client.getCode({ address: mapped });
+      deployed = code !== undefined && code !== "0x";
+    }
+
+    return json({
+      query: "forward",
+      xrpl_address,
+      flare_address: mapped,
+      deployed,
+      network,
+      controller,
+      source_id: decodeSourceId(sourceId),
+      note: mapped
+        ? deployed
+          ? "Smart Account is deployed and live on Flare."
+          : "Address is reserved deterministically but no contract is deployed there yet. It becomes live on first use."
+        : "The controller returned the zero address for this XRPL account.",
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -110,9 +141,24 @@ export async function getSmartAccountInfo(args: {
       content: [
         {
           type: "text" as const,
-          text: `Failed to fetch smart account info for ${xrpl_address} on ${network}: ${message}`,
+          text: `Failed to read Smart Account info on ${network}: ${message}`,
         },
       ],
     };
   }
+}
+
+function json(payload: unknown) {
+  return {
+    content: [
+      { type: "text" as const, text: JSON.stringify(payload, null, 2) },
+    ],
+  };
+}
+
+/** bytes32 source id is an ASCII tag ("XRP") right-padded with zero bytes. */
+function decodeSourceId(sourceId: `0x${string}`): string {
+  const hex = sourceId.slice(2).replace(/(00)+$/, "");
+  const bytes = hex.match(/.{1,2}/g) ?? [];
+  return bytes.map((b) => String.fromCharCode(parseInt(b, 16))).join("");
 }

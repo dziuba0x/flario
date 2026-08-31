@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.4.0 (2026-08-31): prompts, two stubs turned real, CI
+
+The release that makes Flario something a stranger can pick up.
+
+- **Five MCP prompts** (`src/prompts/onboarding.ts`): `flare_tour`,
+  `verify_a_price`, `prove_a_web_fact`, `fassets_health_check`,
+  `why_flare_for_agents`. They appear in the client's prompt list and take
+  someone from "I have heard Flare has an oracle" to "I verified a price
+  against consensus on my own machine" without reading a doc page. Each one
+  drives real calls and is written to admit what is not live yet.
+
+- **`get_ftso_providers` now reads the chain.** It used to fail on install
+  unless you pointed `FLARE_PROVIDERS_API` at an indexer that does not exist
+  publicly. It now reads the VoterRegistry directly —
+  `getRegisteredVotersAndNormalisedWeights` for the current reward epoch, plus
+  `getWeightsSums` — and returns providers ranked by share of normalised vote
+  weight. 100 providers on mainnet, 65 on Songbird, no external service.
+  `FLARE_PROVIDERS_API` is now optional decoration that adds human-readable
+  names and can never break the call.
+
+- **`get_smart_account_info` now answers.** It guessed at a `getFlareAddress`
+  function that does not exist on the MasterAccountController and returned
+  "coming soon". It now uses the published interface: `getPersonalAccount` for
+  the forward lookup (XRPL account to its deterministic Flare address) and
+  `isSmartAccount` for the reverse (Flare address to its XRPL owner), and it
+  distinguishes an address that is *reserved* from one that is *deployed*.
+
+- **CI** (`.github/workflows/ci.yml`): build and the full test suite on Node
+  20, 22 and 24, plus a cold-start job (`scripts/smoke-stdio.mjs`) that spawns
+  the built server over stdio with no env vars and asserts the handshake,
+  `tools/list`, `prompts/list` and `resources/list` — the exact path a new
+  user's client takes on first run.
+
+- **`server.json`**: Flario is now publishable to the official MCP registry.
+
+- **`scripts/live-check.ts` no longer fails on rotten fixtures.** The hosted
+  FDC verifiers only index a rolling window of source-chain history, so a
+  replayed XRP request eventually returns "TRANSACTION DOES NOT EXIST". That is
+  the fixture ageing out, not the tool breaking, and it is now reported as SKIP
+  instead of turning the whole run red. The script also exercises the two
+  repaired tools.
+
+- **Documentation sync** carried over from the 1.3.0 follow-up: STATE.md
+  rewritten around a "verified vs merely exposed" split, DECISIONS.md and
+  README expanded, and the `flario` keyword added to package.json (the package
+  was not findable by its own name).
+
+- **Rebrand leftovers closed.** The old `flare-mcp` string is gone from the
+  demo client, and the 0.4.0 entry below now notes that `FLARE_MCP_HTTP_*` was
+  renamed to `FLARIO_HTTP_*`. Note that the stale Claude Desktop and Cursor
+  snippets in the old CLAUDE.md pointed at the npm package `flare-mcp`, which
+  belongs to an unrelated product; the rewritten CLAUDE.md in this release no
+  longer contains them.
+
+- 21 tools, 5 prompts, 2 resources; 96 tests.
+
 ## 1.3.0 (2026-07-21): prove any web fact (Web2Json), plus a hub hardening fix
 
 - **`fdc_web2json_request`** (new): turn any public web API into a fact a smart
@@ -107,6 +163,10 @@ makes them trust-minimized.
 - 16 tools total; 65 tests.
 
 ## 0.4.0 (2026-07-17): hub mode (hosted HTTP + spec-style x402)
+
+> Note (1.4.0): the `FLARE_MCP_HTTP_*` variables below were renamed to
+> `FLARIO_HTTP_*` in the 1.0.0 rebrand. The historical names are kept in this
+> entry for accuracy; use `FLARIO_HTTP_PORT` and `FLARIO_HTTP_HOST` today.
 
 - **`--http [port]` / `FLARE_MCP_HTTP_PORT`**: run flare-mcp as a hostable
   service, MCP over Streamable HTTP at `POST /mcp` (stateless, all 15

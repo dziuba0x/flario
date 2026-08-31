@@ -64,9 +64,10 @@ import {
   fdcVerifyWeb2JsonInput,
 } from "./tools/web2json.js";
 import { registerNetworkResources } from "./resources/network.js";
+import { registerOnboardingPrompts } from "./prompts/onboarding.js";
 
 
-export const SERVER_INFO = { name: "flario", version: "1.3.0" } as const;
+export const SERVER_INFO = { name: "flario", version: "1.4.0" } as const;
 
 export function buildServer(): McpServer {
   const server = new McpServer({ ...SERVER_INFO });
@@ -136,7 +137,7 @@ server.tool(
 
 server.tool(
   "get_smart_account_info",
-  "Resolve the deterministic Flare address for an XRPL account (r... format) via the MasterAccountController, and report whether the Smart Account exists on-chain.",
+  "Resolve between XRPL accounts and Flare Smart Accounts via the on-chain MasterAccountController. Forward: give an XRPL account (r...) to get its deterministic Flare address and whether the account is actually deployed yet. Reverse: give a Flare address (0x...) to find out whether it is a Smart Account and which XRPL account owns it.",
   getSmartAccountInfoInput,
   getSmartAccountInfo,
 );
@@ -219,6 +220,7 @@ server.tool(
 );
 
 registerNetworkResources(server);
+  registerOnboardingPrompts(server);
 
   return server;
 }

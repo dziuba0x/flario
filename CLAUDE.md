@@ -1,313 +1,152 @@
-# CLAUDE.md — Flario Project Brief
+# CLAUDE.md: Flario project brief
 
-> **REBRAND (2026-07-21, nadrzędne): projekt nazywa się teraz `Flario`.**
-> npm: `flario` (goła nazwa, bez scope); komenda: `npx flario`; repo:
-> github.com/dziuba0x/flario; nazwa serwera MCP: `flario`; schemat paragonu:
-> `flario-receipt/1`; env vary huba: `FLARIO_HTTP_HOST/PORT` (ale sieciowe
-> `FLARE_RPC*`, `FLARE_PRIVATE_KEY` zostają z prefiksem `FLARE_`). W tekstach
-> „flare-mcp" = stara nazwa; produkt = Flario. „Flare"/„MCP" trzymamy w
-> taglinie i keywordach dla SEO. Handoff wizji: `~/Downloads/claude-code-handoff-prompt.md`.
-> Kierunek: warstwa rozliczeń ekonomii agentów (organy: ręce/MCP, portfel/x402,
-> paragon/FDC). Ścieżka „krawędź" — narzędzia dające dziś przewagę. Szczegóły:
-> `STATE.md`, `DECISIONS.md`, `RECEIPT_SPEC.md`.
+Short brief for any session working on this repo. It describes the project as it
+actually is today, verified against the code. It is deliberately not a catalogue
+of the 21 tools; that lives in README.md.
 
-> **V2 AMENDMENTS (2026-07, nadrzędne wobec reszty pliku):**
-> 1. Sieci: **cztery** — mainnet (14), Coston2 (114), **Songbird (19), Coston (16)**; env vary `FLARE_RPC_SONGBIRD`, `FLARE_RPC_COSTON`.
-> 2. Zasada READ-ONLY złagodzona **wyłącznie** dla `fdc_request_attestation`: opcjonalny `FLARE_PRIVATE_KEY` (podpis lokalny, nigdy logowany) pozwala wysłać attestation request do FdcHub; bez klucza tryb prepared-only. Żaden tool nie ma nigdy custody środków.
-> 3. Duże ABI (IAssetManager, IFdcVerification, IRelay, IFdcHub) pobieramy z oficjalnego `@flarenetwork/flare-periphery-contract-artifacts` (`interfaceToAbi`), nie ręcznie.
-> 4. Nowe toole v2: `fdc_request_attestation`, `fdc_get_attestation_proof` (lokalna weryfikacja Merkle vs Relay), `fassets_agent_status`, `fassets_system_state`, `songbird_fcc_registry`.
-> 5. Testy: `npm test` (vitest, recorded fixtures w `test/fixtures/`), live checks: `npx tsx scripts/live-check.ts`.
-> 6. Decyzje i odstępstwa: patrz `DECISIONS.md`. Spec v2: `~/Desktop/flare-mcp-v2-x402-build-spec.md`.
+Companion documents:
 
-## Co budujesz
+- **STATE.md**: where the project stands right now, and what is verified vs merely exposed
+- **DECISIONS.md**: why things are the way they are, including corrections and open questions
+- **RECEIPT_SPEC.md**: the versioned contract for the x402 settlement receipt
 
-**flare-mcp** — pierwszy MCP (Model Context Protocol) server dla Flare Network.
-Pozwala Claude Desktop, Cursor, VS Code i każdemu MCP-compatible AI na bezpośrednie
-odpytywanie Flare blockchain przez natural language. Zero serwera, zero kosztów —
-działa lokalnie przez stdio transport jako npx package.
-
-**Autor:** Dziuba Technology / Alan Dziuba  
-**Repozytorium docelowe:** github.com/[USERNAME]/flare-mcp  
-**npm package name:** flare-mcp  
+> This file was rewritten on 2026-07-21 because the previous version still
+> described the v0.1.0 project (read-only, stdio-only, package `flare-mcp`). Those
+> rules are no longer true and following them would break working features. See
+> "Rules that changed" below.
 
 ---
 
-## Stack — nic poza tym
+## 1. What Flario is
+
+**Flario** is an MCP (Model Context Protocol) server for **Flare Network**. It gives
+an AI agent plain-language access to Flare's enshrined protocols (FTSO, FDC,
+FAssets), and it gives that agent a wallet: premium tools are paid per call with
+x402 settled on Flare, and every payment returns a receipt the chain itself can
+prove.
+
+- npm package: **`flario`** (bare name, unscoped)
+- command: **`npx flario`**, bin name `flario`
+- repo: **github.com/dziuba0x/flario**
+- MCP server name reported to clients: `flario`
+- author: Dziuba Technology / Alan Dziuba
+
+Positioning: complementary to Flare's official MCP server. Theirs does docs search
+and gives an agent knowledge; Flario calls the protocols and gives an agent hands
+and a wallet.
+
+## 2. State today (v1.3.0)
+
+- **21 tools**: 19 free, 2 premium (`fassets_liquidation_scanner`,
+  `fdc_bulk_proof_bundle`, both wrapped with `withX402` in `src/tools/premium.ts`).
+  Premium tools run free unless the operator sets `X402_ENABLED=true`.
+- **90 tests** passing (`npm test`, vitest, recorded fixtures plus hub integration).
+- **Two transports**: stdio (default) and hub mode (`--http [port]`, or
+  `FLARIO_HTTP_PORT`), which serves MCP over Streamable HTTP at `POST /mcp` plus
+  x402-paid REST endpoints.
+- **Four networks**: Flare mainnet (14), Coston2 (114), Songbird (19), Coston (16).
+
+## 3. Architecture
 
 ```
-TypeScript (ESM, Node.js 18+)
-@modelcontextprotocol/sdk        ← MCP server framework
-viem                             ← EVM RPC client (NIE ethers.js)
-zod                              ← input validation dla tools
-@flarenetwork/flare-periphery-contract-artifacts ← Flare ABIs
+src/
+  index.ts              entry point; picks stdio or hub mode
+  server.ts             buildServer(): registers every tool and resource
+  hub.ts                HTTP hub: POST /mcp, x402 REST endpoints, discovery, healthz
+  tools/                one module per protocol area
+    wallet.ts, stake.ts            balances, delegation, vote power, rewards
+    ftso.ts                        FTSO feeds, anchor feeds (proof-carrying), history
+    fassets.ts, fassets-v2.ts      FAssets status, agents, system state, agent identity
+    fdc.ts, fdc-v2.ts              FDC proof status, attestation request, proof verify
+    fdc-settlement.ts              FDC-verified x402 settlement (verify AND bind)
+    web2json.ts                    Web2Json request + verify with source binding
+    fcc.ts                         Flare Confidential Compute registry watcher
+    premium.ts                     the two x402-gated tools
+    smart-accounts.ts              XRPL to Flare account resolution
+  x402/                 the entire payment layer, isolated so it can be replaced
+    config.ts           env-driven config; returns null when disabled
+    facilitator.ts      EIP-3009 verify and settle; never holds funds
+    paywall.ts          withX402 wrapper: 402 requirements, payment arg, receipt
+    receipt.ts          the ZK-ready receipt (see RECEIPT_SPEC.md)
+  utils/
+    rpc.ts              viem clients per network, optional local signer
+    contracts.ts        ContractRegistry lookups, official ABIs
+    fdc.ts              FDC helpers: verifier, DA layer, Merkle fold
+    ftso-da.ts          FTSO anchor feeds over the DA layer
+    runtime.ts          stdio vs hub posture; gates on-chain submission
+  resources/network.ts  MCP resources (feed list, contract registry info)
 ```
 
-**Package manager:** npm (nie yarn, nie pnpm)  
-**Build:** tsc → dist/  
-**Transport:** WYŁĄCZNIE stdio (read-only, bez private keys, bez transakcji)
+## 4. Rules that still apply
 
----
+1. **No custody, ever.** No tool may hold, forward, or gain signing authority over
+   user funds. x402 settlement moves tokens directly payer to payee inside
+   `transferWithAuthorization`; the operator key only pays gas to broadcast an
+   authorization the client already signed.
+2. **Private keys sign locally and are never logged or transmitted.**
+   `FLARE_PRIVATE_KEY` is read from the environment, used in-process, and leaves
+   only as an already-signed transaction to the configured RPC.
+3. **viem, not ethers.js.**
+4. **zod validation on every tool input.** No exceptions.
+5. **Contract ABIs come from `@flarenetwork/flare-periphery-contract-artifacts`**
+   (`interfaceToAbi`), and addresses resolve at runtime through the
+   `ContractRegistry`. Never hardcode an address. Every protocol constant cites its
+   Flare doc URL in a comment.
+6. **No `console.log`.** stdout belongs to the MCP protocol. Logs go to stderr.
+7. **No central behavioural database, ever.** `settledNonces` is in-memory only and
+   must never be persisted per payer. The durable replay barrier is the on-chain
+   EIP-3009 `authorizationState`.
+8. **Every tool handles RPC failure** and returns a clear error rather than throwing.
+9. **Verify, then bind.** A valid Merkle proof is necessary but never sufficient.
+   Tools that consume proofs must also bind them to the thing the caller cared
+   about (the actual ERC-20 transfer, the expected source URL). This is the
+   project's signature pattern.
+10. **Do not guess on anything financial or cryptographic.** Resolve it empirically
+    against the live network or the official docs, or flag it in DECISIONS.md.
 
-## Absolutne zasady — nigdy ich nie łam
+## 5. Rules that changed (v0.1.0 to today)
 
-1. **READ-ONLY** — żadnych transakcji, żadnych private keys, żadnych state-changing calls
-2. **stdio transport only** — nie implementuj HTTP/SSE w tej wersji
-3. **viem, nie ethers.js** — Flare używa viem w swoich oficjalnych narzędziach
-4. **Wszystkie sieci konfigurowalne** — mainnet (chainId: 14) i Coston2 testnet (chainId: 114)
-5. **Zod validation** dla każdego tool input — bez wyjątków
-6. **Error handling** — każdy tool musi zwracać sensowny error message gdy RPC fail
-7. **Żadnych hardcoded private keys** — RPC URL przez env var FLARE_RPC (mainnet) i FLARE_RPC_TESTNET (Coston2)
+| Old rule | Why it changed | Rule today |
+| --- | --- | --- |
+| "READ-ONLY, no transactions, no private keys" | v2 needs FDC attestation requests, and x402 has to settle on-chain | Writes are **opt-in**. Without `FLARE_PRIVATE_KEY` every tool is read-only and attestation tools return a prepared request. With a key, only attestation requests and x402 settlement may spend. Custody is still forbidden. |
+| "stdio transport only, do not implement HTTP/SSE" | Hosting the server for agents requires a network transport | stdio **and** hub mode (Streamable HTTP). Both are supported and tested. |
+| npm name `flare-mcp`, repo `[USERNAME]/flare-mcp` | The bare name was taken, and a generic name cannot be owned | npm `flario`, repo `dziuba0x/flario`. See DECISIONS 11. |
+| Two networks (mainnet, Coston2) | Protocol work needs the canary chains | Four networks: mainnet, Coston2, Songbird, Coston. |
+| The v1 tool catalogue (8 tools) | Superseded | 21 tools; see README.md. |
 
----
+## 6. Security posture
 
-## Struktura projektu — dokładnie tak
+- **stdio vs hub is a trust boundary.** In stdio mode the only caller is the person
+  who launched the process, so spending their own gas is what they asked for. In hub
+  mode anyone who can reach the port is a caller, and the operator key exists to
+  settle x402 payments.
+- Therefore **on-chain attestation submission is disabled by default in hub mode**
+  (`src/utils/runtime.ts`). It returns the prepared request instead. An operator who
+  intends to pay for callers' requests sets `FLARIO_HUB_ALLOW_SUBMIT=true`. See
+  DECISIONS 14.
+- **`fdc_verify_settlement` never submits a transaction at all**, by design. The
+  attestation request is permissionless, so the holder submits it with their own
+  key. That removes any gas-griefing surface from the verification path.
+- **Mainnet x402 is behind a second flag** (`X402_ALLOW_MAINNET=true`) on top of
+  `X402_ENABLED`.
+- Secrets live only in `.env` (gitignored). `.env.example` documents every variable.
 
-```
-flare-mcp/
-├── src/
-│   ├── index.ts                 ← main entry, MCP server setup
-│   ├── tools/
-│   │   ├── ftso.ts              ← FTSO tools (feeds, providers, history)
-│   │   ├── fassets.ts           ← FAssets tools (status, agents)
-│   │   ├── fdc.ts               ← FDC tools (proof status)
-│   │   ├── wallet.ts            ← balance tools (FLR, WFLR)
-│   │   └── smart-accounts.ts   ← Smart Accounts (XRPL → Flare mapping)
-│   ├── resources/
-│   │   └── network.ts          ← MCP resources (feed list, contract addresses)
-│   └── utils/
-│       ├── rpc.ts              ← viem clients, chain configs
-│       └── contracts.ts        ← Flare contract addresses (mainnet + Coston2)
-├── CLAUDE.md                   ← ten plik
-├── TASKS.md                    ← lista etapów
-├── package.json
-├── tsconfig.json
-└── README.md
-```
+## 7. Working rules for a session
 
----
+- Verify facts against the code and the live network before writing them down.
+- Before touching FDC, FTSO or FAssets behaviour, read the relevant page under
+  `dev.flare.network` (append `.md` to any docs URL for the machine-readable form;
+  the index is at `dev.flare.network/llms.txt`).
+- Tests accompany every tool. Recorded fixtures live in `test/fixtures/`.
+  Live checks: `npx tsx scripts/live-check.ts`.
+- Keep STATE.md current at the end of a session so the next one resumes cleanly.
+- Public-facing text (README, npm and GitHub descriptions) is written in a plain
+  human voice, without em-dashes or other stylistic tells.
 
-## Flare Network — kluczowe dane techniczne
+## 8. Out of scope
 
-### RPC Endpoints
-```
-Mainnet:   https://flare-api.flare.network/ext/C/rpc     (chainId: 14)
-Coston2:   https://coston2-api.flare.network/ext/C/rpc   (chainId: 114)
-```
-
-### Kluczowe kontrakty (przez ContractRegistry pattern)
-
-Flare używa ContractRegistry — **nie hardcoduj adresów kontraktów bezpośrednio**.
-Zamiast tego pobieraj je runtime przez `getContractAddressByName()`:
-
-```typescript
-// ContractRegistry address (ten sam na mainnet i Coston2)
-const CONTRACT_REGISTRY = "0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019"
-
-// Przykład pobierania adresu FtsoV2:
-// getContractAddressByName("FtsoV2")
-// getContractAddressByName("FAssetManager") 
-// getContractAddressByName("FdcHub")
-// getContractAddressByName("WNat")
-```
-
-### FTSO Feed IDs (przykłady)
-```
-FLR/USD:  0x01464c522f55534400000000000000000000000000  (category 1 = Crypto)
-BTC/USD:  0x014254432f55534400000000000000000000000000
-ETH/USD:  0x014554482f55534400000000000000000000000000
-XRP/USD:  0x015852502f55534400000000000000000000000000
-```
-
-Feed format: `category (1 byte) + name (padded to 20 bytes)`
-
-### Jak czytać FTSO feeds (FtsoV2Interface)
-```typescript
-// getFeedById(feedId) → (value: uint256, decimals: int8, timestamp: uint64)
-// getFeedsById(feedIds[]) → (values[], decimals[], timestamp)
-// getFeedByIdInWei(feedId) → value in wei (18 decimals)
-```
-
-### Jak czytać FAssets
-```typescript
-// FAssetManager: getAgents() → agent list
-// CollateralPool: agentInfo(agent) → collateral ratio, minted amount
-```
-
----
-
-## MCP Tools — pełna specyfikacja
-
-### Tool: get_ftso_feed
-```
-Input:  feed_id (string, np. "FLR/USD"), network ("mainnet" | "coston2")
-Output: price (number), decimals (number), timestamp (unix), feed_id, network
-```
-
-### Tool: get_ftso_feeds_all  
-```
-Input:  network ("mainnet" | "coston2")
-Output: array of {feed_id, name, price, decimals, timestamp}
-Feeds do pobrania z FtsoV2 — pobierz listę z oficjalnego Flare dev docs
-lub hardcode top 20 feeds (FLR, BTC, ETH, XRP, DOGE, ADA, SOL, MATIC...)
-```
-
-### Tool: get_ftso_providers
-```
-Input:  network ("mainnet" | "coston2")
-Output: array of {name, address, vote_power, fee_percent, reward_rate}
-Dane z: FtsoRewardManager lub DA Layer API (https://flare-systems-explorer.flare.network)
-Jeśli on-chain zbyt kompleksowe → użyj public flaremetrics.io API jako fallback
-```
-
-### Tool: get_ftso_history
-```
-Input:  feed_id (string), rounds (number, max 100), network
-Output: array of {round_id, price, decimals, timestamp, turnout_bips}
-Dane z: data-availability API jeśli dostępne, lub VotingResult events
-```
-
-### Tool: get_flr_balance
-```
-Input:  address (string, EVM hex), network ("mainnet" | "coston2")
-Output: flr_balance (string w ether), wflr_balance (string w ether), address
-```
-
-### Tool: get_fassets_status
-```
-Input:  asset ("FXRP" | "FBTC" | "FDOGE"), network
-Output: total_minted (string), total_collateral (string), active_agents (number),
-        collateral_ratio (number), minting_paused (boolean)
-```
-
-### Tool: get_fdc_proof_status
-```
-Input:  voting_round_id (number), network
-Output: merkle_root (string), security_status (string), timestamp,
-        protocol_id (number, 200 for FDC)
-Data z: ContractRegistry → Relay contract → getProtocolMessageMerkleRoot()
-```
-
-### Tool: get_smart_account_info
-```
-Input:  xrpl_address (string, r... format), network
-Output: flare_address (string), has_account (boolean), network
-Mapping: każdy XRPL address ma deterministycznie zmapowany Flare address
-przez MasterAccountController kontrakt
-```
-
----
-
-## MCP Resources
-
-### Resource: flare://network/feeds
-```
-Zwraca: JSON z listą wszystkich oficjalnych FTSO feed IDs i ich nazwami
-Static data z Flare developer hub — aktualizuj ręcznie w utils/contracts.ts
-```
-
-### Resource: flare://network/contracts
-```
-Zwraca: JSON z adresami kluczowych kontraktów na mainnet i Coston2
-Pobierane runtime przez ContractRegistry
-```
-
----
-
-## package.json — wymagana konfiguracja bin
-
-```json
-{
-  "name": "flare-mcp",
-  "version": "0.1.0",
-  "type": "module",
-  "bin": {
-    "flare-mcp": "dist/index.js"
-  },
-  "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsx src/index.ts",
-    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js"
-  }
-}
-```
-
-Shebang line w dist/index.js musi być: `#!/usr/bin/env node`
-
----
-
-## tsconfig.json — wymagana konfiguracja
-
-```json
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "outDir": "dist",
-    "rootDir": "src",
-    "strict": true,
-    "esModuleInterop": true,
-    "declaration": true
-  },
-  "include": ["src/**/*"]
-}
-```
-
----
-
-## Jak użytkownik konfiguruje (docelowy UX)
-
-### Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`)
-```json
-{
-  "mcpServers": {
-    "flare-mcp": {
-      "command": "npx",
-      "args": ["-y", "flare-mcp"],
-      "env": {
-        "FLARE_RPC": "https://flare-api.flare.network/ext/C/rpc",
-        "FLARE_RPC_TESTNET": "https://coston2-api.flare.network/ext/C/rpc"
-      }
-    }
-  }
-}
-```
-
-### Cursor (`~/.cursor/mcp.json`)
-```json
-{
-  "mcpServers": {
-    "flare-mcp": {
-      "command": "npx",
-      "args": ["-y", "flare-mcp"]
-    }
-  }
-}
-```
-
----
-
-## Źródła wiedzy — użyj gdy potrzebujesz szczegółów
-
-- Flare dev docs: https://dev.flare.network/
-- FTSO overview: https://dev.flare.network/ftso/overview
-- FAssets: https://dev.flare.network/fassets/overview  
-- FDC: https://dev.flare.network/fdc/overview
-- Smart Accounts: https://dev.flare.network/smart-accounts/overview
-- MCP SDK docs: https://modelcontextprotocol.io/docs
-- MCP TypeScript SDK: https://github.com/modelcontextprotocol/typescript-sdk
-- Flare periphery artifacts: https://github.com/flare-foundation/flare-npm-periphery-package
-
----
-
-## Czego NIE rób
-
-- Nie implementuj transakcji ani funkcji write
-- Nie używaj ethers.js (tylko viem)
-- Nie hardcoduj RPC URL (env vars)
-- Nie pomijaj zod validation
-- Nie implementuj HTTP/SSE transport
-- Nie używaj `any` w TypeScript
-- Nie zapominaj o obsłudze błędów RPC (try/catch wszędzie)
-- Nie używaj `console.log` (MCP używa stdout do komunikacji — logi tylko na stderr)
+ZK circuits, the agent passport, reputation systems, a marketplace, a public
+facilitator service for third parties, and FCE implementations. Design data formats
+so those remain possible later, but do not build them here. FCC tooling belongs in
+Flario when the contracts become publicly addressable; passport and marketplace do
+not.

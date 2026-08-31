@@ -1,7 +1,12 @@
 // FTSO tools: get_ftso_feed, get_ftso_feeds_all, get_ftso_anchor_feed, get_ftso_history
 import { z } from "zod";
 import { getClient, type NetworkType } from "../utils/rpc.js";
-import { getContractAddress, FTSO_FEEDS } from "../utils/contracts.js";
+import {
+  getContractAddress,
+  getInterfaceAbi,
+  FTSO_FEEDS,
+} from "../utils/contracts.js";
+import { getAddress } from "viem";
 import {
   resolveAnchorFeedId,
   fetchAnchorFeeds,
@@ -98,64 +103,114 @@ export async function getFtsoFeed(args: {
 
 export const getFtsoProvidersInput = {
   network: z.enum(["mainnet", "coston2", "songbird", "coston"]),
+  reward_epoch_id: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe("Reward epoch to read. Defaults to the current one."),
+  limit: z.number().int().min(1).max(200).default(50),
 };
 
-export async function getFtsoProviders(args: { network: NetworkType }) {
-  const { network } = args;
-
-  // FTSO provider rankings come from an off-chain indexer — the fully on-chain
-  // aggregation (VoterRegistry + FlareSystemsManager + reward managers) is too
-  // heavy for a read-only stdio server, and no stable free public REST API
-  // ships by default. The endpoint is therefore operator-configurable.
-  const endpoint = process.env.FLARE_PROVIDERS_API;
-  if (!endpoint) {
-    return {
-      isError: true,
-      content: [
-        {
-          type: "text" as const,
-          text:
-            `get_ftso_providers needs an external FTSO indexer endpoint, which is not bundled with Flario. ` +
-            `Set the FLARE_PROVIDERS_API env var to an endpoint that returns a JSON array of providers ` +
-            `(or { "providers": [...] }) to enable it. In the meantime you can browse providers for ` +
-            `${network} at https://flare-systems-explorer.flare.network/providers.`,
-        },
-      ],
-    };
-  }
+/**
+ * The set of FTSO data providers, read straight off the chain.
+ *
+ * A provider is a voter registered in the VoterRegistry for a reward epoch.
+ * `getRegisteredVotersAndNormalisedWeights` returns both the addresses and
+ * their normalised vote weights, so the signing power distribution comes from
+ * consensus state rather than from anyone's indexer.
+ *
+ * Human-readable provider names are genuinely off-chain: they live in
+ * community metadata, not in a contract. If FLARE_PROVIDERS_API is set we
+ * decorate the on-chain rows with names from it, but the tool works fully
+ * without it and never fails because it is missing. That is the honest split:
+ * consensus data on-chain, cosmetic labels optional.
+ */
+export async function getFtsoProviders(args: {
+  network: NetworkType;
+  reward_epoch_id?: number;
+  limit?: number;
+}) {
+  const { network, reward_epoch_id, limit = 50 } = args;
 
   try {
-    const url = endpoint.includes("?")
-      ? `${endpoint}&network=${encodeURIComponent(network)}`
-      : `${endpoint}?network=${encodeURIComponent(network)}`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`provider API responded with HTTP ${res.status}`);
-    }
+    const client = getClient(network);
 
-    const raw = (await res.json()) as unknown;
-    const list = Array.isArray(raw)
-      ? raw
-      : Array.isArray((raw as { providers?: unknown }).providers)
-        ? (raw as { providers: unknown[] }).providers
-        : [];
+    const systemsManager = getAddress(
+      await getContractAddress("FlareSystemsManager", network),
+    );
+    const epoch =
+      reward_epoch_id !== undefined
+        ? BigInt(reward_epoch_id)
+        : BigInt(
+            (await client.readContract({
+              address: systemsManager,
+              abi: getInterfaceAbi("IFlareSystemsManager", network),
+              functionName: "getCurrentRewardEpochId",
+            })) as bigint | number,
+          );
 
-    const providers = list.map((p) => {
-      const r = p as Record<string, unknown>;
-      return {
-        name: r.name ?? r.providerName ?? null,
-        address: r.address ?? r.providerAddress ?? null,
-        vote_power: r.vote_power ?? r.votePower ?? null,
-        fee_percent: r.fee_percent ?? r.feePercent ?? r.fee ?? null,
-        reward_rate: r.reward_rate ?? r.rewardRate ?? null,
-      };
-    });
+    const voterRegistry = getAddress(
+      await getContractAddress("VoterRegistry", network),
+    );
+    const registryAbi = getInterfaceAbi("IIVoterRegistry", network);
+
+    const [voters, weights] = (await client.readContract({
+      address: voterRegistry,
+      abi: registryAbi,
+      functionName: "getRegisteredVotersAndNormalisedWeights",
+      args: [epoch],
+    })) as [readonly `0x${string}`[], readonly number[]];
+
+    const [, normalisedWeightsSum] = (await client.readContract({
+      address: voterRegistry,
+      abi: registryAbi,
+      functionName: "getWeightsSums",
+      args: [epoch],
+    })) as [bigint, number, number];
+
+    const names = await fetchProviderNames(network);
+
+    const ranked = voters
+      .map((address, i) => {
+        const weight = Number(weights[i] ?? 0);
+        return {
+          address,
+          name: names.get(address.toLowerCase()) ?? null,
+          normalised_weight: weight,
+          share_percent:
+            normalisedWeightsSum > 0
+              ? Number(((weight / normalisedWeightsSum) * 100).toFixed(4))
+              : null,
+        };
+      })
+      .sort((a, b) => b.normalised_weight - a.normalised_weight);
+
+    const top = ranked.slice(0, limit);
+    const cumulative = top.reduce((acc, p) => acc + (p.share_percent ?? 0), 0);
 
     return {
       content: [
         {
           type: "text" as const,
-          text: JSON.stringify({ network, providers }, null, 2),
+          text: JSON.stringify(
+            {
+              network,
+              reward_epoch_id: Number(epoch),
+              registered_providers: voters.length,
+              returned: top.length,
+              normalised_weights_sum: normalisedWeightsSum,
+              source: "on-chain VoterRegistry (no external indexer)",
+              names_source: names.size
+                ? "FLARE_PROVIDERS_API"
+                : "not configured — addresses only, which is normal",
+              cumulative_share_percent_of_returned: Number(cumulative.toFixed(4)),
+              voter_registry: voterRegistry,
+              providers: top,
+            },
+            null,
+            2,
+          ),
         },
       ],
     };
@@ -166,11 +221,50 @@ export async function getFtsoProviders(args: { network: NetworkType }) {
       content: [
         {
           type: "text" as const,
-          text: `Failed to fetch FTSO providers for ${network} from ${endpoint}: ${message}`,
+          text: `Failed to read FTSO providers on ${network}: ${message}`,
         },
       ],
     };
   }
+}
+
+/**
+ * Optional, best-effort address -> name map. Never throws: a missing or broken
+ * names endpoint must not take down a tool whose real payload is on-chain.
+ */
+async function fetchProviderNames(
+  network: NetworkType,
+): Promise<Map<string, string>> {
+  const endpoint = process.env.FLARE_PROVIDERS_API;
+  const out = new Map<string, string>();
+  if (!endpoint) return out;
+
+  try {
+    const url = endpoint.includes("?")
+      ? `${endpoint}&network=${encodeURIComponent(network)}`
+      : `${endpoint}?network=${encodeURIComponent(network)}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return out;
+
+    const raw = (await res.json()) as unknown;
+    const list = Array.isArray(raw)
+      ? raw
+      : Array.isArray((raw as { providers?: unknown }).providers)
+        ? (raw as { providers: unknown[] }).providers
+        : [];
+
+    for (const entry of list) {
+      const r = entry as Record<string, unknown>;
+      const address = (r.address ?? r.providerAddress) as string | undefined;
+      const name = (r.name ?? r.providerName) as string | undefined;
+      if (typeof address === "string" && typeof name === "string") {
+        out.set(address.toLowerCase(), name);
+      }
+    }
+  } catch {
+    // Cosmetic enrichment only; on-chain data already stands on its own.
+  }
+  return out;
 }
 
 export const getFtsoAnchorFeedInput = {

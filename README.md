@@ -1,5 +1,6 @@
 # Flario
 
+[![CI](https://github.com/dziuba0x/flario/actions/workflows/ci.yml/badge.svg)](https://github.com/dziuba0x/flario/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/flario.svg)](https://www.npmjs.com/package/flario)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](#license)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-339933.svg)](https://nodejs.org)
@@ -12,6 +13,12 @@ Install it with `npx flario`, or run it as an HTTP hub. It works against the pub
 Flario covers the whole enshrined stack: FTSO prices (including proof-carrying anchor feeds), FDC attestation workflows with local Merkle-proof verification, deep FAssets state (per-agent collateral, liquidation risk, system totals, the redemption queue), a Flare portfolio read (delegation, vote power, claimable rewards), Songbird and Coston support, and a watcher for Flare Confidential Compute contracts. Reads are trust-minimized: FDC and FTSO proofs are checked locally against the on-chain Relay root, never taken from an API on faith. The one write, `fdc_request_attestation`, only submits a transaction if you set `FLARE_PRIVATE_KEY`; otherwise it hands you a prepared request to sign yourself.
 
 > **This is complementary to Flare's official MCP server**, not a replacement. Their server (`dev.flare.network/mcp`) does documentation search, so it gives an agent knowledge. Flario gives an agent hands and a wallet: it calls the enshrined protocols and lets the agent pay for computed results, with receipts the chain can verify. Use both.
+
+### Where this sits in the x402 ecosystem
+
+Flario speaks the standard x402 wire format, so it is not a private dialect. Payment requirements come back in the usual shape, the payment payload travels base64-encoded in the `X-Payment` header on the HTTP hub, and the settlement summary comes back in `X-Payment-Response`. An existing x402 client can pay a Flario endpoint without knowing anything about MCP, and an MCP agent can pay without knowing anything about HTTP.
+
+What Flario adds on top is a proof layer. In a typical x402 deployment, the client learns that a payment settled because the facilitator says so and points at a transaction. Because Flare has a data connector enshrined in the chain, Flario can go further: `fdc_verify_settlement` obtains an FDC attestation over the settlement transaction, verifies the Merkle proof locally against the on-chain Relay root, and binds it to the actual ERC-20 transfer, so the receipt stands on its own without trusting the facilitator. That step depends on a protocol built into the chain, which is why it is hard to port elsewhere.
 
 ---
 
@@ -106,6 +113,20 @@ npx -y @modelcontextprotocol/inspector --cli npx -y flario \
 ```
 
 ---
+
+## Start here: five prompts, no Flare knowledge required
+
+Tools answer questions. Prompts tell you what to ask in the first place. Flario ships five, and they show up in your MCP client's prompt list once it is connected — in Claude Desktop, the `+` menu in the message box.
+
+| Prompt | What it does |
+| --- | --- |
+| **Show me what Flare can do** | A guided tour through live calls: a price, the same price carrying a proof you verify locally, FAssets state. Start here if Flare is new to you. |
+| **Verify a price without trusting anyone** | Reads one feed twice, plain and proof-carrying, then walks through exactly what earned the `verified: true` — which leaf, which fold, which contract the root came from. |
+| **Turn a web API into a provable fact** | Web2Json end to end, including the trap: a valid proof only proves the data came from the URL inside it, not that the URL deserves your trust. |
+| **Check FAssets system health** | A real risk read on live agent collateral against live prices, not a description of how FAssets works. |
+| **Why Flare, for someone building agents** | The case for and against, grounded in calls rather than the marketing site, including where the ecosystem is weak. |
+
+Every prompt instructs the model to run the calls for real against the live network and then explain what happened, so you end up with actual numbers and a mental model at the same time. They are deliberately written to admit when something is not live yet rather than talk around it.
 
 ## Tools
 

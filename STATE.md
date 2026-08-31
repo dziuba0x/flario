@@ -1,135 +1,157 @@
-# STATE.md — Flario / Agent Settlement Layer on Flare
+# STATE.md: where Flario stands
 
-Running project state, updated per session so any future session/model resumes
-with zero context loss. Handoff brief: `~/Downloads/claude-code-handoff-prompt.md`.
+Running project state, refreshed at the end of a session so the next one resumes
+with no context loss. Companions: CLAUDE.md (the brief), DECISIONS.md (why), and
+RECEIPT_SPEC.md (the receipt contract).
 
-Last updated: 2026-07-21 (session: audit + receipts + FDC-settlement + rebrand to
-Flario, model handoff Fable 5 → Opus 4.8).
+Last updated: 2026-08-31, release 1.4.0 (prompts, two stubs turned real, CI).
 
-**NAME:** project rebranded `@dziuba0x/flare-mcp` → **Flario** (npm `flario`, repo
-github.com/dziuba0x/flario, command `npx flario`). Same code, own brand. See
-DECISIONS §11. "Flare"/"MCP" kept in tagline+keywords for discovery.
+## Snapshot (verified against the code)
 
-## Snapshot
+- Package **`flario` v1.4.0**. Published to npm under the bare name. Repo public at
+  github.com/dziuba0x/flario. Command `npx flario`. MCP server name `flario`.
+- **21 tools** (19 free, 2 premium), **5 prompts**, **2 resources**. Prompts live in
+  `src/prompts/onboarding.ts` and are the onboarding surface for a stranger.
+- Tools detail: 19 free, 2 premium (`fassets_liquidation_scanner`,
+  `fdc_bulk_proof_bundle`). Registration lives in `src/server.ts`; `src/index.ts` is
+  only the entry point that chooses a transport.
+- **96 tests** green (`npm test`), plus a cold-start stdio smoke job in CI
+  (`scripts/smoke-stdio.mjs`) that asserts the handshake and all three list
+  endpoints with no env vars.
+- **Transports**: stdio (default) and hub mode (`--http [port]` or
+  `FLARIO_HTTP_PORT`), serving MCP over Streamable HTTP at `POST /mcp` plus
+  x402-paid REST endpoints. Hub binds `127.0.0.1` unless `FLARIO_HTTP_HOST` says
+  otherwise.
+- **Networks**: mainnet (14), Coston2 (114), Songbird (19), Coston (16).
+- Receipt schema emitted by the code: **`flario-receipt/1`**.
 
-- Package: **`flario` v1.3.0** on npm (bare name); repo public at
-  github.com/dziuba0x/flario; git tree clean.
-- Tests: 90 passing (vitest, recorded fixtures + hub integration). `npm test` green.
-- Tools: 21 (19 free + 2 premium). Transports: stdio (default) and hub mode
-  (`--http`, MCP Streamable HTTP + spec-style x402 REST).
-- Strategy: EDGE path (be THE complete Flare MCP), then the proof-carrying moat.
-  P1 DONE (proof-carrying FTSO anchor feeds + fixed history, DECISIONS 12).
-  P2 DONE (`get_flr_stake_info` portfolio + `fassets_agent_details`).
-  P3 DONE (README as a landing page, human voice, no AI tells).
-  FLAGSHIP DONE: Web2Json (`fdc_web2json_request` + `fdc_verify_web2json`),
-  which turns any public web API into a contract-verifiable fact and BINDS the
-  proof to an expected source (DECISIONS 13). Plus a real security fix: hub mode
-  no longer lets anonymous callers spend the operator key (DECISIONS 14).
-- Architecture decision (operator, 2026-07-21): everything "an agent doing
-  something with Flare" lives in Flario as more tools, including FCC when it
-  lands. Passport/reputation and marketplace stay separate future projects built
-  on Flario's receipts. Do not fragment the brand.
-- FCC watch: `songbird_fcc_registry` reports 0 FCC contracts on all four
-  networks as of 2026-07-21, but flare-foundation is actively pushing
-  `tee-proxy`, `tee-node`, `fce-extension-scaffold`. When contracts appear
-  on-chain, being first with an agent interface to FCC is the next big move.
-- Live-verified on-chain (Coston2): FDC full cycle (own attestation, round
-  1397964), x402 settlement over MCP (tx 0x19eb…a7dd) and over HTTP
-  (tx 0xf230…cab2, replay rejected).
+## What is built
 
-## Phase 1 — enshrined-stack coverage: DONE
+**Enshrined-stack coverage.** FTSO (spot feeds, proof-carrying anchor feeds,
+history from the public DA layer), FDC (attestation request, proof retrieval with
+local Merkle verification, Web2Json), FAssets (agent status, system state, agent
+identity, liquidation risk), staking and portfolio reads, Smart Accounts lookup,
+and an FCC registry watcher.
 
-| Tool | Status |
+**x402 payment layer** (`src/x402/`). EIP-3009 `transferWithAuthorization`
+settlement, local EIP-712 verification, on-chain nonce check, replay protection
+both on-chain and in-process. Never holds funds. Disabled unless `X402_ENABLED`,
+and mainnet needs `X402_ALLOW_MAINNET` on top.
+
+**Receipts.** Every settled payment emits `x402_receipt`: fixed schema, payer only
+as a Poseidon/BN254 commitment, keccak256 tamper-evidence hash, optional blinding
+salt. Contract in RECEIPT_SPEC.md.
+
+**Verify-then-bind, the signature pattern.** `fdc_verify_settlement` binds an FDC
+EVMTransaction attestation to the actual ERC-20 transfer. `fdc_verify_web2json`
+binds a Web2Json proof to the source the caller expected. A cryptographically valid
+proof for the wrong thing is rejected with a precise reason.
+
+**Hub hardening.** On-chain attestation submission is refused in hub mode unless
+`FLARIO_HUB_ALLOW_SUBMIT=true`, so an anonymous caller cannot spend the operator
+key that exists to settle payments (DECISIONS 14).
+
+## Verified vs merely exposed
+
+This is the most important section for a new session. "Verified" means exercised
+end to end against the live network by this project, not merely documented by Flare
+or reachable through a tool signature.
+
+**Verified end to end (Coston2 unless noted)**
+
+| Path | Evidence |
 | --- | --- |
-| `fdc_request_attestation` | Done; live-submitted to FdcHub (Coston2). |
-| `fdc_get_attestation_proof` | Done; **local** Merkle verify vs on-chain Relay root. |
-| `fassets_agent_status` | Done; mainnet/Coston2/Songbird. |
-| `fassets_system_state` | Done. |
-| `songbird_fcc_registry` | Done as a **watcher**: FCC not yet publicly addressable per docs; reports status, lights up when contracts register. |
+| FDC `Payment` / `xrp` | Our own attestation submitted and proof verified, round 1397964 |
+| FDC `AddressValidity` / `xrp` | Local Merkle verification against the Relay root, fixture round 1397600 |
+| FDC `EVMTransaction` / `flr` (`testFLR`) | Settlement attestation verified and bound, round 1402609 |
+| FDC `Web2Json` / `PublicWeb2` | Submitted, verified, source-bound, payload decoded, round 1409295; wrong-host and wrong-path proofs rejected |
+| FTSO anchor feeds | Local fold matches `Relay.merkleRoots(100, round)` on Coston2 **and mainnet**, cross-checked against `FtsoV2Interface.verifyFeedData` |
+| FTSO history over the public DA layer | Coston2, every point Merkle-verified |
+| x402 settlement over MCP | Coston2 tx `0x19eb...a7dd` |
+| x402 settlement over HTTP hub | Coston2 tx `0xf230...cab2`, replay rejected |
+| Receipt emission and hash | Coston2 tx `0xb380...9184`, blinded commitment, hash verified |
+| FAssets reads | mainnet, Coston2, Songbird (FXRP) |
+| Portfolio and agent identity reads | mainnet |
 
-Networks: mainnet(14), Coston2(114), Songbird(19), Coston(16). ABIs from official
-`@flarenetwork/flare-periphery-contract-artifacts`. Addresses via ContractRegistry
-at runtime (never hardcoded).
+**Exposed but not verified by us**
 
-## Phase 2 — x402 payment layer: PARTIAL
+| Path | Status |
+| --- | --- |
+| FDC `EVMTransaction` / `eth` | Documented by Flare, never exercised here |
+| FDC `EVMTransaction` / `sgb` | Exposed by the tool, never exercised here |
+| FDC `Payment` and `AddressValidity` / `btc`, `doge` | Exposed by the tool, never exercised here |
+| FDC submission on mainnet, Songbird, Coston | Only Coston2 has been submitted to; the others are reads only |
+| x402 on mainnet | Never exercised. Behind `X402_ALLOW_MAINNET`, off by default |
+| FAssets FBTC and FDOGE | No AssetManager exists yet; only FXRP is live |
+| FCC contracts | Zero found in the registry on all four networks; the tool is a watcher |
 
-Done:
-- `src/x402/` (config, facilitator, paywall) — EIP-3009 `transferWithAuthorization`
-  settlement; verify EIP-712 signature locally + on-chain nonce check; never holds
-  funds (operator key only pays gas to broadcast the client-signed authorization).
-- Premium tools: `fassets_liquidation_scanner` (FAssets × live FTSO), `fdc_bulk_proof_bundle`.
-- Replay protection: on-chain EIP-3009 nonce (`authorizationState`) + in-process
-  settled-nonce set.
-- Payment-token gate resolved on-chain: mainnet USD₮0 has EIP-3009; Coston2 demo
-  uses deployed MockUSDT0 (0x3c71…D176). Details in DECISIONS §8a–8d.
+This resolves the older contradiction between DECISIONS 9 (which said `flr` was
+unverified) and DECISIONS 10 (which reported it verified). DECISIONS 10 is correct
+and later: `flr` on Coston2 is verified. `eth` and `sgb` remain unverified.
 
-## Hub mode (v0.4.0): DONE
+## Open items
 
-`POST /mcp` (stateless MCP Streamable HTTP, all 15 tools) + REST premium endpoints
-with real HTTP 402 / `X-Payment` / `X-Payment-Response`. Dockerfile included.
-Binds 127.0.0.1 by default; `FLARE_MCP_HTTP_HOST=0.0.0.0` to expose.
+- **Mainnet x402 has never run.** Before enabling it, exercise one settlement on
+  mainnet with a small amount, and set `X402_PAY_TO` to the production address
+  recorded in `.env` as `X402_PAY_TO_PRODUCTION`.
+- **No test asserts the receipt `schema_version` string literally.** The existing
+  test compares against the imported constant, so it cannot catch a spec drift like
+  the one this sync just fixed. Adding a literal assertion would close that.
+- **No demo recording yet.** The operator records it; `scripts/x402-demo-client.ts`
+  is the scenario.
+- **FCC watch.** flare-foundation is actively pushing `tee-proxy`, `tee-node` and
+  `fce-extension-scaffold`, but nothing is registered on-chain yet. When it lands,
+  being first with an agent interface to FCC is the next big move.
 
----
+## Direction
 
-## GAPS vs the handoff brief (this is the work ahead)
+Strategy is the "edge" path: be the obvious, complete MCP server for Flare, then
+deepen the proof-carrying moat that no other chain can copy. Architecture decision
+by the operator: anything that is "an agent doing something with Flare" belongs in
+Flario as more tools, including FCC when it arrives. The agent passport, reputation
+and a marketplace stay separate future projects built on top of Flario's receipts,
+so the brand does not fragment.
 
-### G1 — ZK-ready receipt (Principle 3). **DONE (2026-07-21), organ 3 shipped.**
-Built `src/x402/receipt.ts` + `RECEIPT_SPEC.md`. Receipt `x402_receipt` emitted
-on both transports (additive; `x402_payment_receipt` unchanged). Payer only as a
-Poseidon/BN254 commitment (operator chose Poseidon — DECISIONS §8e), optional
-`commitment_salt` blinding, keccak256 `receipt_hash` tamper-evidence,
-`fdc_attestation_ref` reserved (null until G2). 12 unit tests + live-verified
-end-to-end on Coston2 (settlement tx 0xb380…9184). Honest privacy caveat
-documented (EIP-3009 exposes payer on-chain; commitment is forward-looking).
-Not yet published to npm (pending operator: publish now vs batch with G2).
+Not in scope here: ZK circuits, passport, reputation, marketplace, a public
+facilitator for third parties, FCE implementations, and any UI beyond the README.
 
-### G2 — FDC-verified settlement (Principle 4). **DONE (2026-07-21), the differentiator.**
-New tool `fdc_verify_settlement` (`src/tools/fdc-settlement.ts`): FDC
-**EVMTransaction** attestation over the settlement tx (corrected from the
-handoff's "Payment" — that's BTC/DOGE/XRP only; DECISIONS §10), locally
-Merkle-verified, then **bound** to the payment (attested tx must contain an
-ERC-20 `Transfer` of the asset → payee for ≥ amount). `attachFdcRef` upgrades a
-receipt to its FDC-verified form. Tool never submits on-chain (anti-gas-grief).
-10 unit tests (binding security core + attachFdcRef). Live end-to-end on
-Coston2: pending final confirmation of the running background test (submit →
-finalize → verify+bind, incl. rejection of wrong amount/payee/asset).
+## Where the loop actually stands (2026-08-31)
 
-### G3 — README lacks explicit complementary positioning (Phase 1 criterion).
-No mention of the official docs-MCP (dev.flare.network/mcp) or the framing
-"they give agents knowledge; we give agents hands and a wallet." Cheap to fix.
+Honest status, because this is the section a future session should trust.
 
-### G4 — Principle 2 (no central behavioral DB): currently SATISFIED, keep it so.
-`settledNonces` is in-memory only, ephemeral, holds `payer:nonce` pairs for
-replay defense. Must **never** be persisted per-payer to a server we control. The
-durable replay barrier is the on-chain `authorizationState`; a hosted hub across
-restarts must rely on-chain, not build a per-payer nonce DB.
+- **Shipped and working:** the code. Cold install of the published package comes
+  up and answers `tools/list`. Live mainnet reads verified this session: FTSO
+  spot and anchor feeds, history off the DA layer, FAssets system state and
+  agents on three networks, FTSO providers (100 mainnet / 65 Songbird), Smart
+  Account forward and reverse lookup.
+- **Not yet done, and this is the whole remaining problem:** distribution.
+  Flario is not in the official MCP registry (`server.json` is written, not
+  published). No GitHub Release exists despite a full CHANGELOG. npm downloads
+  are registry mirrors, not people: ~4/day, 26 in the last seven days. One star.
+- **The lesson this repo keeps teaching:** a documentation rewrite sat
+  uncommitted from 12 August to 31 August. The bottleneck was never the code.
 
-### G5 — Principle 5 (private-until-release): SATISFIED/moot.
-Repo went public post-v2 release, which is what the principle prescribes.
+### Next, in order
 
-## Proposed shortest path (my recommendation)
+1. Publish 1.4.0 to npm; tag `v1.4.0` and cut the GitHub Release from the
+   CHANGELOG entry.
+2. `mcp-publisher login github` then `mcp-publisher publish` with `server.json`.
+3. List on Glama, mcp.so, PulseMCP.
+4. Announce with a concrete claim and a paste-able call, not "I built an MCP
+   server": an agent gets an FLR price with a Merkle proof it verifies locally
+   against the on-chain Relay root, in one call.
 
-1. **Receipt schema + `RECEIPT_SPEC.md`** (G1) — **DONE**.
-2. **FDC-verified settlement path** (G2) — **NEXT**. The differentiator; composes
-   the already-verified FDC tools; populates `fdc_attestation_ref`. Security-
-   critical. Open sub-decision D2 below (anchoring) resolves here.
-3. **README positioning + docs** (G3) — **DONE** (complementary framing + receipt).
+### Then, and only then: 1.5.0
 
-## Open decisions for the operator (flagged, not guessed — Principles 3 & 6)
+The differentiator worth building next is *attestation of the fact*, not
+*attestation of execution*. The crowded field (VeritasChain VAP, Vouched
+Checkpoint, Attest MCP, ZK-for-MCP-execution) proves the server ran correctly,
+which still asks you to trust the operator or the hardware. Flario can prove the
+fact itself against enshrined consensus, which is a different claim and needs a
+chain with an enshrined oracle to make.
 
-- **D1 (crypto):** commitment primitive — **RESOLVED**: operator chose Poseidon
-  (DECISIONS §8e). Self-describing schemes keep it upgradeable.
-- **D2 (economics, for the FDC path):** an on-chain receipt-hash anchor contract
-  would add one tx per call — doubles gas on fraction-of-a-cent pricing.
-  Recommendation: defer; use settlement tx hash + FDC attestation as the anchor.
-  Confirm when building G2.
-- **D3 (Principle 6):** production revenue address — operator provides later;
-  until then payment flows target the `.env` placeholder on testnet.
-- **D4 (release):** publish receipt layer now as 0.5.0, or batch with the
-  FDC-verified path (G2) into one 0.5.0? Recommendation: batch, so the headline
-  differentiator ships with the receipt that carries it — but priority is already
-  timestamped in git/GitHub.
+The missing piece is small: a bundler that packs several already-verifiable
+facts (FTSO anchor, FDC EVMTransaction, Web2Json, receipt hash) into one
+portable artefact a recipient verifies offline, without trusting Flario, the DA
+API, or the agent. Every primitive exists; only the glue is missing.
 
-## Out of scope (do NOT build): ZK circuits, agent passport, reputation,
-marketplace, public third-party facilitator, FCE, any UI beyond README/demo.
-Design formats to be ready for them; do not build them.

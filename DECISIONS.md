@@ -1,13 +1,37 @@
-# DECISIONS.md — flare-mcp v2
+# DECISIONS.md: why Flario is the way it is
 
-Ambiguities and deviations flagged during the build, per the v2 build spec
-("Flag anything ambiguous in a DECISIONS.md file instead of guessing
-silently"). Dates are 2026-07-15/16 unless noted.
+Ambiguities, corrections and deviations recorded during the build, rather than
+guessed at silently. Entries were appended over time and the newest ones sit near
+the top, so the numbers are not in reading order. Use this index; the numbers are
+stable because other documents cite them.
+
+| # | Date | Decision |
+| --- | --- | --- |
+| [1](#1-the-specs-published-npm-package-does-not-exist-on-the-registry) | 2026-07-15 | The build spec's "already published" npm package did not exist |
+| [2](#2-fcc-is-not-publicly-addressable-songbird_fcc_registry-ships-as-a-watcher) | 2026-07-15 | FCC is not publicly addressable, so the tool ships as a watcher |
+| [3](#3-v1s-read-only-no-private-keys-rule-vs-v2s-fdc_request_attestation) | 2026-07-15 | v1's read-only rule vs v2's need to submit attestations |
+| [4](#4-phase-2-payment-token-gate-first-pass-from-the-official-docs) | 2026-07-15 | Payment-token gate, first pass from the official docs |
+| [5](#5-fassets-scope-fxrp-only) | 2026-07-15 | FAssets scope: FXRP only |
+| [6](#6-collateral-totals-are-sampled) | 2026-07-15 | Collateral totals are sampled, not exhaustive |
+| [7](#7-live-network-testing-of-transaction-submission-resolved-2026-07-17) | 2026-07-17 | Attestation submission verified live |
+| [8a](#8a-phase-2-payment-token-gate-resolved-option-a-2026-07-16) | 2026-07-16 | Payment-token gate resolved: EIP-3009 works |
+| [8b](#8b-x402-for-mcp-mapping-stdio-has-no-http-statusheaders) | 2026-07-16 | Mapping x402 onto MCP, which has no HTTP headers |
+| [8c](#8c-settlement-resolved-end-to-end-on-coston2-2026-07-17) | 2026-07-17 | Settlement verified end to end on Coston2 |
+| [8d](#8d-npm-identity-a-publishing-false-alarm) | 2026-07-17 | npm identity, and a publishing false alarm I called wrong |
+| [8e](#8e-receipt-commitment-primitive-poseidonbn254-operator-decision-2026-07-21) | 2026-07-21 | Receipt commitment primitive: Poseidon over BN254 |
+| [9](#9-evmtransaction-source-chains) | 2026-07-15 | EVMTransaction source chains (superseded in part by 10) |
+| [10](#10-fdc-verified-settlement-uses-evmtransaction-not-payment-operator-confirmed-2026-07-21) | 2026-07-21 | FDC-verified settlement uses EVMTransaction, not Payment |
+| [11](#11-rebrand-to-flario-operator-decision-2026-07-21) | 2026-07-21 | Rebrand to Flario |
+| [12](#12-proof-carrying-ftso-anchor-feeds-p1-2026-07-21) | 2026-07-21 | Proof-carrying FTSO anchor feeds |
+| [13](#13-web2json-verify-and-bind-the-source-p-flagship-2026-07-21) | 2026-07-21 | Web2Json: verify and bind the source |
+| [14](#14-hub-mode-must-not-let-strangers-spend-the-operator-key-found-2026-07-21) | 2026-07-21 | Hub mode must not let strangers spend the operator key |
+
+Dates are 2026-07-15/16 unless an entry says otherwise.
 
 ## 1. The spec's "published npm package" does not exist on the registry
 
 The spec calls `@dziubatechnology/flare-mcp` an "existing published package".
-`npm view @dziubatechnology/flare-mcp` returns **404** — it was never
+`npm view @dziubatechnology/flare-mcp` returns **404**, it was never
 published (or was unpublished). The local v1 source at `~/flare-mcp`
 (v0.1.0) was used as the base instead. Consequence: the "npm weekly
 downloads > 3× v1 baseline" metric has no baseline, and the 0.2.0 release
@@ -41,7 +65,7 @@ prepared request + fee + FdcHub address (`mode: "prepared_only"`), keeping
 the server fully read-only. Set → the key signs locally via viem and is
 never logged or transmitted. No other tool can ever spend funds.
 
-## 4. Phase 2 payment-token gate — already largely resolved by official docs
+## 4. Phase 2 payment-token gate: first pass from the official docs
 
 The spec's blocking Phase 2 question (which Flare token supports gasless
 authorization transfers) is answered by
@@ -67,7 +91,7 @@ https://dev.flare.network/fxrp/token-interactions/x402-payments (fetched
 Only `AssetManagerFXRP` exists in the registries of mainnet, Coston2 and
 Songbird (verified live). FBTC/FDOGE inputs are accepted and probed but
 return a clear "not live" error. Registry name variants from v1
-(`FXrpAssetManager`, etc.) were dropped — the canonical name is confirmed.
+(`FXrpAssetManager`, etc.) were dropped, the canonical name is confirmed.
 
 ## 6. Collateral totals are sampled
 
@@ -77,7 +101,7 @@ redemption queue is paginated up to 10 × `maxRedeemedTickets` tickets. If
 agent counts grow past these caps the numbers become partial; the response
 reports `agents_sampled` so consumers can tell.
 
-## 7. Live-network testing of transaction submission — RESOLVED (2026-07-17)
+## 7. Live-network testing of transaction submission: RESOLVED (2026-07-17)
 
 The full FDC cycle was executed live on Coston2 with our own attestation:
 `fdc_request_attestation` submitted a Payment request to FdcHub (tx
@@ -88,7 +112,7 @@ verified it locally against the Relay root
 (`0x5fbdc8463844afea63…`, proof depth 2). Earlier, local Merkle verification
 was also validated against third-party attestations (round 1397600).
 
-## 8a. Phase 2 payment-token gate — RESOLVED (option (a), 2026-07-16)
+## 8a. Phase 2 payment-token gate: RESOLVED (option (a), 2026-07-16)
 
 On-chain probes (see also §4):
 
@@ -102,7 +126,7 @@ On-chain probes (see also §4):
   receiveWithAuthorization and EIP-2612 permit. `mint` is restricted
   (owner-only), so demo payers need tokens from the faucet/DEX or a
   self-deployed MockUSDT0 (override via `X402_TOKEN_ADDRESS`). This token is
-  a community/mock deployment — NOT claimed official. The Coston2 faucet
+  a community/mock deployment, NOT claimed official. The Coston2 faucet
   labels a token "USDT0" but its address could not be extracted from the
   faucet app; verify which token the faucet dispenses before the demo.
 - The spec's fallback (c) (FLR + FDC Payment attestation) is **not needed**
@@ -118,7 +142,7 @@ Settlement happens BEFORE the tool runs; a failed settlement never releases
 the result. This mapping is our own design (no MCP payment standard exists);
 documented in README for interop.
 
-## 8c. Settlement — RESOLVED end-to-end on Coston2 (2026-07-17)
+## 8c. Settlement: RESOLVED end-to-end on Coston2 (2026-07-17)
 
 Full x402 flow executed live via `scripts/x402-demo-client.ts`: 402
 requirements → off-chain EIP-3009 signature → verify → settlement tx
@@ -131,7 +155,7 @@ Two findings from the live run:
   "USDT0 test") has **no EIP-3009**, so it cannot pay x402. The demo instead
   deployed the official flare-hardhat-starter `MockUSDT0` (public mint,
   canonical (v,r,s) EIP-3009) to Coston2 at
-  `0x3c71Fb2b7da7CE85dd1aF0A54174668e41BcD176` — set as `X402_TOKEN_ADDRESS`
+  `0x3c71Fb2b7da7CE85dd1aF0A54174668e41BcD176`, set as `X402_TOKEN_ADDRESS`
   for demos. The compiled source is vendored in `contracts/MockUSDT0.sol`.
 - The in-process settled-nonce cache does not survive restarts; the durable
   replay barrier is the on-chain EIP-3009 nonce, consumed at settlement.
@@ -144,7 +168,7 @@ unscoped name `flare-mcp` is taken by an unrelated ticketing product (since
 `@dziubatechnology/flare-mcp` never existed on the registry (§1).
 
 Correction for the record: the commit message of the 0.3.1 bump claims 0.3.0
-was "burned by npm spam-block" — that diagnosis was **wrong**. The registry
+was "burned by npm spam-block", that diagnosis was **wrong**. The registry
 was simply replicating slowly (several minutes of 404s after a successful
 publish), and www.npmjs.com returns HTTP 403 to curl for *every* page (bot
 protection), which mimicked a quarantine. Both 0.3.0 (published by the user)
@@ -153,7 +177,7 @@ before concluding anything from registry/site responses.
 
 Source repository: https://github.com/dziuba0x/flare-mcp (pushed 2026-07-17).
 
-## 8e. Receipt commitment primitive — Poseidon/BN254 (operator decision, 2026-07-21)
+## 8e. Receipt commitment primitive: Poseidon/BN254 (operator decision, 2026-07-21)
 
 Handoff Principle 3 requires receipts where the payer appears only as a
 commitment. The commitment primitive is load-bearing (it must match the future
@@ -226,7 +250,7 @@ per voting epoch with a Merkle proof. Resolved empirically (as promised, not
 guessed): the on-chain root is `Relay.merkleRoots(100, votingRoundId)` (FTSO
 Scaling = protocol id 100; FDC = 200), and the Merkle leaf is
 `keccak256(abi.encode(body))` where body = `{votingRoundId uint32, id bytes21,
-value int32, turnoutBIPS uint16, decimals int8}`, sorted-pair fold — confirmed
+value int32, turnoutBIPS uint16, decimals int8}`, sorted-pair fold, confirmed
 two ways: local fold == on-chain root, AND `FtsoV2Interface.verifyFeedData`
 returns true. DA endpoints: `/api/v0/ftso/anchor-feeds-with-proof` (POST,
 feed_ids + voting_round_id) and `/api/v0/ftso/anchor-feed-names`. `get_ftso_history`
@@ -237,19 +261,19 @@ prove name resolution).
 ## 11. Rebrand to Flario (operator decision, 2026-07-21)
 
 The project moved off the descriptive/generic name to an ownable brand: **Flario**
-(npm `flario` — the bare, unscoped name was free; repo github.com/dziuba0x/flario;
+(npm `flario`, the bare, unscoped name was free; repo github.com/dziuba0x/flario;
 command `npx flario`). Rationale: the bare `flare-mcp` was never available (taken
 by an unrelated product), and a generic name collides with the official Flare MCP
-and can't be owned. "Flario" = "Flare I/O" — reads as the input/output layer to
+and can't be owned. "Flario" = "Flare I/O", reads as the input/output layer to
 Flare, keeps the Flare family association without impersonating (distinct word,
 own meaning), and is fully ownable (npm + flario.io/.xyz/.dev free). Checks: no
 crypto/dev collision; one unrelated `Flairio Labs` exists (different spelling
-FLAIRIO, video-commerce SaaS — different class, low risk); a formal trademark
+FLAIRIO, video-commerce SaaS, different class, low risk); a formal trademark
 search is advisable before heavy brand spend but fine for an OSS launch. Version
 reset to 1.0.0 as the brand launch. Positioning keeps "Flare" and "MCP" in the
 tagline/keywords for discovery.
 
-## 10. FDC-verified settlement — EVMTransaction, not Payment (operator-confirmed, 2026-07-21)
+## 10. FDC-verified settlement uses EVMTransaction, not Payment (operator-confirmed, 2026-07-21)
 
 The handoff (Principle 4) describes the differentiator as an "FDC **Payment**
 attestation." Correction, flagged and confirmed with the operator: FDC Payment
@@ -270,7 +294,7 @@ including rejection of overclaimed amount, wrong payee, and wrong asset.
 **No on-chain submission from the tool (anti-griefing).** `fdc_verify_settlement`
 never submits an FdcHub transaction. Submitting an attestation request costs a
 fee + gas; if a hosted hub auto-submitted on every call it could be griefed into
-draining the operator's gas. The request is permissionless — the holder submits
+draining the operator's gas. The request is permissionless, the holder submits
 it themselves (via `fdc_request_attestation`, which they run with their own key).
 Phase 1 of the tool only *prepares* (verifier API, no chain write); phase 2
 verifies + binds. This keeps the verification tool free and abuse-resistant.
@@ -285,3 +309,9 @@ Verifier docs list Ethereum, Flare and Songbird as EVMTransaction sources
 (`eth`, `flr`, `sgb` path segments; `testETH` etc. on testnet). Only the
 `eth` path is exercised in the docs; `flr`/`sgb` are exposed by the tool but
 unverified against the hosted verifiers.
+
+**Update (2026-07-21), partially superseded by 10.** The `flr` path is no longer
+unverified: `EVMTransaction/flr` with source id `testFLR` was confirmed VALID by
+the hosted testnet verifier and then used end to end on Coston2 (round 1402609)
+for FDC-verified settlement. `eth` and `sgb` remain exposed but unexercised by
+this project. STATE.md carries the current verified-vs-exposed table.
