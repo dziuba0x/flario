@@ -3,7 +3,7 @@
   "name": "io.github.dziuba0x/flario",
   "title": "Flario — Flare Network",
   "description": "Give an agent proof-carrying access to Flare: FTSO prices with a Merkle proof verified locally against the on-chain root, FDC cross-chain attestations, FAssets state, and x402 payments that settle on the same chain they serve.",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "websiteUrl": "https://github.com/dziuba0x/flario#readme",
   "repository": {
     "url": "https://github.com/dziuba0x/flario",
@@ -13,8 +13,10 @@
     {
       "registryType": "npm",
       "identifier": "flario",
-      "version": "1.4.0",
-      "transport": { "type": "stdio" },
+      "version": "1.4.1",
+      "transport": {
+        "type": "stdio"
+      },
       "environmentVariables": [
         {
           "name": "FLARE_RPC",

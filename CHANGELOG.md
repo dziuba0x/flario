@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.1 (2026-08-31): registry ownership metadata
+
+- **`mcpName` in package.json.** The MCP Registry verifies that a server's
+  metadata matches its published package by reading an `mcpName` property out
+  of the npm tarball, and it must equal the `name` in `server.json`
+  (`io.github.dziuba0x/flario`). 1.4.0 shipped without it, so registry
+  publication would have failed validation. npm versions are immutable, hence a
+  patch release rather than a re-publish.
+- No functional changes. Same 21 tools, 5 prompts, 96 tests.
+
 ## 1.4.0 (2026-08-31): prompts, two stubs turned real, CI
 
 The release that makes Flario something a stranger can pick up.
