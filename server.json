@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.dziuba0x/flario",
-  "title": "Flario — Flare Network",
-  "description": "Give an agent proof-carrying access to Flare: FTSO prices with a Merkle proof verified locally against the on-chain root, FDC cross-chain attestations, FAssets state, and x402 payments that settle on the same chain they serve.",
+  "title": "Flario",
+  "description": "Flare for agents: FTSO prices with locally verified Merkle proofs, FDC, FAssets, x402 pay.",
   "version": "1.4.1",
   "websiteUrl": "https://github.com/dziuba0x/flario#readme",
   "repository": {
