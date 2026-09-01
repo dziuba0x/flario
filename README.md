@@ -24,7 +24,7 @@ What Flario adds on top is a proof layer. In a typical x402 deployment, the clie
 
 ## Why Flario
 
-- **It goes deep on the protocols that are built into Flare.** FTSO, FDC, and FAssets are enshrined in the chain, and so are Flario's 23 tools. A generic multi-chain MCP server can't reach any of this, and the depth doesn't port to another chain.
+- **It goes deep on the protocols that are built into Flare.** FTSO, FDC, and FAssets are enshrined in the chain, and so are Flario's 24 tools. A generic multi-chain MCP server can't reach any of this, and the depth doesn't port to another chain.
 - **Answers carry a proof, so you don't have to take my word for it.** Prices and cross-chain facts come with a Merkle proof that Flario checks locally against the on-chain root. An agent, or even a smart contract, can rely on the answer without trusting any API.
 - **Agents can pay, and they get a receipt.** Premium tools settle per call over [x402](https://www.x402.org/) on Flare, and each payment returns a portable receipt that Flare's own FDC can prove, not just the facilitator's word for it. No other chain in the x402 ecosystem can do that today.
 - **Self-hostable, no custody.** It runs on public RPCs, asks for no account or key to read data, and never touches your funds.
@@ -103,7 +103,7 @@ The same block works in any MCP client with stdio support (VS Code, Windsurf, Ze
 ### Check it works (no client, ~10 s)
 
 ```bash
-# List all 23 tools straight from the published package:
+# List all 24 tools straight from the published package:
 npx -y @modelcontextprotocol/inspector --cli npx -y flario --method tools/list
 
 # Or call one, a proof-carrying FLR/USD price on mainnet:
@@ -114,9 +114,9 @@ npx -y @modelcontextprotocol/inspector --cli npx -y flario \
 
 ---
 
-## Start here: six prompts, no Flare knowledge required
+## Start here: seven prompts, no Flare knowledge required
 
-Tools answer questions. Prompts tell you what to ask in the first place. Flario ships six, and they show up in your MCP client's prompt list once it is connected — in Claude Desktop, the `+` menu in the message box.
+Tools answer questions. Prompts tell you what to ask in the first place. Flario ships seven, and they show up in your MCP client's prompt list once it is connected — in Claude Desktop, the `+` menu in the message box.
 
 | Prompt | What it does |
 | --- | --- |
@@ -125,9 +125,35 @@ Tools answer questions. Prompts tell you what to ask in the first place. Flario 
 | **Turn a web API into a provable fact** | Web2Json end to end, including the trap: a valid proof only proves the data came from the URL inside it, not that the URL deserves your trust. |
 | **Check FAssets system health** | A real risk read on live agent collateral against live prices, not a description of how FAssets works. |
 | **Prove what an agent acted on** | Bundles the facts behind a decision, then attacks the bundle so you can watch the verification catch a forged one. |
+| **Watch Flare 2.0 roll out** | Reads the confidential-compute deployment off the chain — which networks have it, what it can do — while the rollout is still happening. |
 | **Why Flare, for someone building agents** | The case for and against, grounded in calls rather than the marketing site, including where the ecosystem is weak. |
 
 Every prompt instructs the model to run the calls for real against the live network and then explain what happened, so you end up with actual numbers and a mental model at the same time. They are deliberately written to admit when something is not live yet rather than talk around it.
+
+## Watch Flare 2.0 arrive
+
+Flare's confidential compute is being deployed right now, one network at a time, and Flare has not published an ABI for it — `FlareTeeManager` is absent from the periphery artifacts, alpha releases included. `fcc_deployment_status` reads it anyway, because the interesting facts do not need an ABI.
+
+As of 1 September 2026 it reports:
+
+```
+Confidential compute is registered on: coston.
+Not yet on: mainnet, songbird, coston2.
+
+coston: FlareTeeManager @ 0xc4885998f5D792ed88C5Af7a3AaCBe333f017658
+  ERC-2535 diamond, 18 facets, 198 selectors, 0 unrecognised
+  live state: 11 governance signers, machine allowlist revised 4 times
+  fdc2Hub()          -> 0x064C7B68B0e2BC87e7bE34e89741485Fcb48FA2F  (has code)
+  fdc2Verification() -> 0x21D3842E39A3b62ba15CD8A5D2ED5cEDea931502  (has code)
+```
+
+The capabilities come out of the selectors: Protocol Managed Wallets, remote attestation of TEE machines and their code hashes, multi-signature governance over the machine allowlist, randomness generated inside the enclave, and FDC V2 wiring.
+
+### Why selectors instead of function calls
+
+A tool built on guessed function signatures breaks the moment Flare finalises the interface. Selectors are the routing table inside the diamond — they are facts on-chain, and a rename does not move them. So the tool reports what is exact (facets, selectors, addresses, wiring, governance state) and flags what is inferred: human-readable names come from a public signature database, and the report says so every time it prints one. All 198 resolved and are thematically coherent, which makes the mapping almost certainly right, but "almost certainly" is what gets printed rather than something firmer.
+
+This is a testnet deployment of an unfinished system and anything in it can change. That is the point of a monitor rather than an integration.
 
 ## Prove what an agent acted on
 
@@ -157,7 +183,7 @@ It is also a different claim from the one most verifiable-tool-call work makes. 
 
 ## Tools
 
-Every tool validates its input with [zod](https://zod.dev) and returns a clear error instead of crashing when an RPC call or data source is down. Twenty-one tools are free. The two premium tools settle via [x402 on Flare](#how-payments-work-x402) when the operator turns it on, and are free otherwise.
+Every tool validates its input with [zod](https://zod.dev) and returns a clear error instead of crashing when an RPC call or data source is down. Twenty-two tools are free. The two premium tools settle via [x402 on Flare](#how-payments-work-x402) when the operator turns it on, and are free otherwise.
 
 | Tool | Networks | Tier | What it does |
 | --- | --- | --- | --- |
@@ -329,7 +355,7 @@ FLARIO_HTTP_HOST=0.0.0.0 npx flario --http 8402
 
 | Endpoint | What it serves |
 | --- | --- |
-| `POST /mcp` | The full MCP server over Streamable HTTP (stateless), all 23 tools, x402 in-band |
+| `POST /mcp` | The full MCP server over Streamable HTTP (stateless), all 24 tools, x402 in-band |
 | `GET /api/premium/liquidation-scanner?asset=FXRP&network=mainnet` | HTTP x402: `402` plus `accepts[]`, retry with the `X-Payment` header, get the result plus `X-Payment-Response` |
 | `POST /api/premium/proof-bundle` | Same x402 flow. Body: `{"requests":[{"voting_round_id":N,"abi_encoded_request":"0x..."}],"network":"..."}` |
 | `GET /` | Discovery: endpoints, x402 config, pricing |

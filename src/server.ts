@@ -65,6 +65,10 @@ import {
 } from "./tools/web2json.js";
 import { registerNetworkResources } from "./resources/network.js";
 import {
+  fccDeploymentStatus,
+  fccDeploymentStatusInput,
+} from "./tools/fcc-deployment.js";
+import {
   evidenceBundle,
   evidenceBundleInput,
   evidenceVerify,
@@ -73,7 +77,7 @@ import {
 import { registerOnboardingPrompts } from "./prompts/onboarding.js";
 
 
-export const SERVER_INFO = { name: "flario", version: "1.5.0" } as const;
+export const SERVER_INFO = { name: "flario", version: "1.6.0" } as const;
 
 export function buildServer(): McpServer {
   const server = new McpServer({ ...SERVER_INFO });
@@ -223,6 +227,13 @@ server.tool(
   "Prove an x402 settlement via Flare's enshrined FDC (trust-minimized, not the facilitator's word). Given a settlement tx hash it prepares an EVMTransaction attestation request (phase 1, free, no chain write); given a finalized voting_round_id + abi_encoded_request it locally Merkle-verifies the attestation AND binds it to the payment — confirming the attested tx contains an ERC-20 Transfer of >= amount of asset to payee. Never submits on-chain itself.",
   fdcVerifySettlementInput,
   fdcVerifySettlement,
+);
+
+server.tool(
+  "fcc_deployment_status",
+  "Watch Flare 2.0 confidential compute roll out, network by network, while it is still happening. Reads the ContractRegistry for a confidential-compute deployment; if it finds an ERC-2535 diamond it enumerates every facet and function selector, maps them to capabilities (Protocol Managed Wallets, enclave VRF, machine remote-attestation, TEE governance, FDC V2), reads what it is wired to, and reports whether the system has live governance state or is an empty shell. Flare has not published an ABI for these contracts, so names come from signature matching while selectors, facets, addresses and wiring are read exactly from the chain.",
+  fccDeploymentStatusInput,
+  fccDeploymentStatus,
 );
 
 server.tool(

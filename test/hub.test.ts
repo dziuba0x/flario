@@ -49,7 +49,7 @@ describe("hub HTTP endpoints", () => {
     expect(res.status).toBe(200);
   });
 
-  it("lists all 23 tools over MCP Streamable HTTP", async () => {
+  it("lists all 24 tools over MCP Streamable HTTP", async () => {
     const res = await fetch(`${BASE}/mcp`, {
       method: "POST",
       headers: {
@@ -60,7 +60,7 @@ describe("hub HTTP endpoints", () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { result: { tools: Array<{ name: string }> } };
-    expect(body.result.tools.length).toBe(23);
+    expect(body.result.tools.length).toBe(24);
     const names = body.result.tools.map((t) => t.name);
     expect(names).toContain("fassets_liquidation_scanner");
     expect(names).toContain("fdc_request_attestation");
@@ -68,6 +68,7 @@ describe("hub HTTP endpoints", () => {
     // when the party verifying it is reaching a hosted endpoint, not stdio.
     expect(names).toContain("evidence_bundle");
     expect(names).toContain("evidence_verify");
+    expect(names).toContain("fcc_deployment_status");
   });
 
   it("returns 402 with x402 requirements on unpaid premium REST", async () => {

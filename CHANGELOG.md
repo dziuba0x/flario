@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.6.0 (2026-09-01): watching Flare 2.0 arrive
+
+Flare's confidential compute went live on Coston on **2026-06-23** and Flare has
+not published an ABI for it — `FlareTeeManager` is absent from the periphery
+artifacts, alpha releases included. Flario's own FCC watcher, which had returned
+zero since July, picked it up.
+
+- **`fcc_deployment_status`** reports the rollout across all four networks. Where
+  it finds a confidential-compute contract it enumerates the ERC-2535 diamond
+  (18 facets, 198 selectors on Coston), maps selectors to capabilities, reads the
+  wiring — including `fdc2Hub()` and `fdc2Verification()`, both of which have
+  code — and distinguishes a configured system from an empty shell by reading
+  governance signers and machine-allowlist revisions.
+
+- **Capabilities are derived from selectors, not from guessed function calls.**
+  A tool built on guessed signatures breaks when Flare finalises the interface;
+  the selector routing table inside a diamond is a fact on-chain that a rename
+  does not move. The report separates what is exact (facets, selectors,
+  addresses, wiring, live state) from what is inferred (human-readable names,
+  resolved from a public signature database — all 198 matched and thematically
+  coherent, but stated as inference every time).
+
+- **`src/utils/fcc-selectors.ts`** ships the decoded map: 198 selectors across
+  12 capability groups — Protocol Managed Wallets, enclave VRF, key backup and
+  restore, machine remote-attestation, TEE governance, FDC V2, extensions, fees.
+
+- **New prompt `watch_flare_2_rollout`** reads the deployment front and explains
+  what the capabilities mean, ending on what would have to happen for a testnet
+  deployment of an unfinished system to matter in production.
+
+- 24 tools, 7 prompts, 2 resources; 111 tests.
+
 ## 1.5.0 (2026-08-31): evidence bundles — attestation of the fact
 
 Everything before this verified a fact at the moment you asked, and then the

@@ -209,7 +209,38 @@ Contrast it briefly with attesting that a server executed correctly, which is wh
   );
 
   // ---------------------------------------------------------------------
-  // 6. For the developer who wants the mental model before the code.
+  // 6. Watching a chain upgrade itself, live.
+  // ---------------------------------------------------------------------
+  server.registerPrompt(
+    "watch_flare_2_rollout",
+    {
+      title: "Watch Flare 2.0 roll out",
+      description:
+        "Read the confidential-compute deployment straight off the chain — which networks have it, what it can do, what it is wired to — while the rollout is still in progress and before Flare has published an ABI.",
+      argsSchema: {},
+    },
+    (): PromptResult =>
+      userPrompt(
+        `Show me where Flare 2.0's confidential compute actually stands right now, using Flario. Read the chain, do not summarise announcements.
+
+1. Call fcc_deployment_status with network "all". Lead with the rollout front: which networks have a confidential-compute contract registered and which do not. That single line is the state of Flare 2.0 today.
+
+2. For any network that has one, walk me through what was found:
+   - is it an ERC-2535 diamond, how many facets, how many function selectors
+   - which capabilities those selectors add up to, in plain language
+   - what it is wired to, and whether FDC V2 has code at the address it points to
+   - whether live_state shows real governance signers and machine-allowlist revisions, or an empty deployment
+
+3. Explain why this tool reads selectors instead of calling functions. Flare has not published an ABI for these contracts — they are absent from the periphery artifacts, alpha included. Selectors are the routing table inside the diamond, so they are facts on-chain that survive a rename, while a tool built on guessed function signatures would break the moment Flare finalises the interface. Say clearly which parts of the report are exact and which came from signature matching.
+
+4. Then tell me what it means. Protocol Managed Wallets mean keys that live inside an enclave rather than with a user. Machine attestation means the chain decides which code hashes and hardware are allowed to hold them. Enclave VRF means randomness nobody chose. Say which of these is genuinely new for a public chain and which is table stakes.
+
+5. Finish honestly: this is a testnet deployment of an unfinished system, so anything here can change. Say what would have to happen for it to matter in production.`,
+      ),
+  );
+
+  // ---------------------------------------------------------------------
+  // 7. For the developer who wants the mental model before the code.
   // ---------------------------------------------------------------------
   server.registerPrompt(
     "why_flare_for_agents",
