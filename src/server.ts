@@ -64,10 +64,16 @@ import {
   fdcVerifyWeb2JsonInput,
 } from "./tools/web2json.js";
 import { registerNetworkResources } from "./resources/network.js";
+import {
+  evidenceBundle,
+  evidenceBundleInput,
+  evidenceVerify,
+  evidenceVerifyInput,
+} from "./tools/evidence.js";
 import { registerOnboardingPrompts } from "./prompts/onboarding.js";
 
 
-export const SERVER_INFO = { name: "flario", version: "1.4.1" } as const;
+export const SERVER_INFO = { name: "flario", version: "1.5.0" } as const;
 
 export function buildServer(): McpServer {
   const server = new McpServer({ ...SERVER_INFO });
@@ -217,6 +223,20 @@ server.tool(
   "Prove an x402 settlement via Flare's enshrined FDC (trust-minimized, not the facilitator's word). Given a settlement tx hash it prepares an EVMTransaction attestation request (phase 1, free, no chain write); given a finalized voting_round_id + abi_encoded_request it locally Merkle-verifies the attestation AND binds it to the payment — confirming the attested tx contains an ERC-20 Transfer of >= amount of asset to payee. Never submits on-chain itself.",
   fdcVerifySettlementInput,
   fdcVerifySettlement,
+);
+
+server.tool(
+  "evidence_bundle",
+  "Package several proof-carrying facts into one portable bundle that someone else can verify without trusting you. Takes FTSO Scaling anchor feeds and finalized FDC attestations (Web2Json included), folds each Merkle proof against the on-chain Relay root BEFORE including it, and refuses any fact that fails. Use when an agent needs to hand a downstream consumer, an auditor, or another agent the evidence its decision rested on.",
+  evidenceBundleInput,
+  evidenceBundle,
+);
+
+server.tool(
+  "evidence_verify",
+  "Verify an evidence bundle from scratch. Rebuilds every leaf from its own body, folds it through its proof, and compares against Relay.merkleRoots(protocol, round) read on-chain right now. Re-binds Web2Json facts to the source recorded in the bundle. Trusts nothing in the bundle, including its own hash. This is the receiving end: run it on a bundle someone hands you.",
+  evidenceVerifyInput,
+  evidenceVerify,
 );
 
 registerNetworkResources(server);

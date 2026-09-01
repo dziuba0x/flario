@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.5.0 (2026-08-31): evidence bundles — attestation of the fact
+
+Everything before this verified a fact at the moment you asked, and then the
+verification evaporated into a sentence nobody could re-check. This release
+makes a verified fact into something you can hand to someone else.
+
+- **`evidence_bundle`** packages FTSO Scaling anchor feeds and finalized FDC
+  attestations (Web2Json included) into one portable object carrying each
+  fact's Merkle proof, voting round, protocol id and the Relay address. Every
+  fact is folded against the on-chain root *before* inclusion; a fact that
+  fails is refused rather than flagged, and a Web2Json fact without
+  `expect_source` is refused too, since an unbound proof attests to whatever
+  URL sits inside it.
+
+- **`evidence_verify`** is the receiving end. It rebuilds every leaf from its
+  own body, folds it through its proof, and compares against
+  `Relay.merkleRoots(protocol, round)` read on-chain at verification time. It
+  re-binds Web2Json facts to the source recorded in the bundle. Nothing in the
+  bundle is trusted, including its own hash.
+
+- **`bundle_hash` is documented as tamper-evidence, not a signature.** Verified
+  live on mainnet: an attacker who triples a price *and* recomputes the hash
+  still fails verification, because the proof no longer folds to a root the
+  validators signed. The hash catches accidents; consensus catches attackers.
+  Claiming otherwise would have been security theatre.
+
+- **New prompt `prove_what_you_acted_on`** walks through building a bundle,
+  verifying it, then forging it two ways and watching both get caught — and
+  ends by stating plainly what a bundle does *not* prove.
+
+- Scope is stated narrowly on purpose: a bundle proves that these specific
+  facts were true in these rounds. Not that the agent was honest about its
+  reasoning, not that these were the only facts it saw. This is a different
+  claim from attesting that a server executed correctly, which still requires
+  trusting the operator or their hardware.
+
+- 23 tools, 6 prompts, 2 resources; 103 tests.
+
 ## 1.4.1 (2026-08-31): registry ownership metadata
 
 - **`mcpName` in package.json.** The MCP Registry verifies that a server's

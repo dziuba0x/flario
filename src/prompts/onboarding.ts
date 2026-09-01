@@ -174,7 +174,42 @@ Be measured. If everything looks healthy and boring, say that instead of manufac
   );
 
   // ---------------------------------------------------------------------
-  // 5. For the developer who wants the mental model before the code.
+  // 5. The thing you cannot do on a chain without an enshrined oracle.
+  // ---------------------------------------------------------------------
+  server.registerPrompt(
+    "prove_what_you_acted_on",
+    {
+      title: "Prove what an agent acted on",
+      description:
+        "Bundle the facts behind a decision into something a third party can verify without trusting the agent, then try to forge it and watch the verification catch you.",
+      argsSchema: {
+        feeds: z
+          .string()
+          .optional()
+          .describe('Comma-separated feed names, e.g. "FLR/USD,BTC/USD". Defaults to FLR/USD.'),
+        network: NETWORK_ARG,
+      },
+    },
+    ({ feeds, network }): PromptResult =>
+      userPrompt(
+        `Show me how an agent can prove which facts it acted on, using Flario against ${network ?? "mainnet"}. Run everything for real.
+
+1. Call evidence_bundle with ftso_feeds ${feeds ? `[${feeds}]` : '["FLR/USD"]'} and a claim describing a decision those prices might support. Show me the bundle. Point out that each fact carries its own Merkle proof, its voting round, and the Relay address, and that a fact which failed verification would have been refused rather than included.
+
+2. Call evidence_verify on that bundle unchanged. Explain that this did not trust the bundle, the agent that made it, or Flario: it rebuilt each leaf, folded it, and compared against Relay.merkleRoots read on-chain just now.
+
+3. Now attack it. Take the bundle, change a price to something false, and verify again. It will fail with a specific reason.
+
+4. Then attack it properly: change the price AND recompute bundle_hash so the hash check passes. Verify again. It still fails, and this is the interesting part — explain why bundle_hash was never the security boundary. The hash catches accidents. The Merkle fold against consensus catches attackers, because an attacker cannot produce a proof folding to a root the validators already signed.
+
+5. Finally, be precise about what this does NOT prove: not that the agent was honest about its reasoning, not that these were the only facts it looked at, and not that its conclusion follows. Only that these specific facts were true, in these rounds. Say plainly why that narrower claim is still worth something.
+
+Contrast it briefly with attesting that a server executed correctly, which is what most verifiable-tool-call work does — that approach still requires trusting the operator or their hardware.`,
+      ),
+  );
+
+  // ---------------------------------------------------------------------
+  // 6. For the developer who wants the mental model before the code.
   // ---------------------------------------------------------------------
   server.registerPrompt(
     "why_flare_for_agents",

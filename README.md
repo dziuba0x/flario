@@ -24,7 +24,7 @@ What Flario adds on top is a proof layer. In a typical x402 deployment, the clie
 
 ## Why Flario
 
-- **It goes deep on the protocols that are built into Flare.** FTSO, FDC, and FAssets are enshrined in the chain, and so are Flario's 21 tools. A generic multi-chain MCP server can't reach any of this, and the depth doesn't port to another chain.
+- **It goes deep on the protocols that are built into Flare.** FTSO, FDC, and FAssets are enshrined in the chain, and so are Flario's 23 tools. A generic multi-chain MCP server can't reach any of this, and the depth doesn't port to another chain.
 - **Answers carry a proof, so you don't have to take my word for it.** Prices and cross-chain facts come with a Merkle proof that Flario checks locally against the on-chain root. An agent, or even a smart contract, can rely on the answer without trusting any API.
 - **Agents can pay, and they get a receipt.** Premium tools settle per call over [x402](https://www.x402.org/) on Flare, and each payment returns a portable receipt that Flare's own FDC can prove, not just the facilitator's word for it. No other chain in the x402 ecosystem can do that today.
 - **Self-hostable, no custody.** It runs on public RPCs, asks for no account or key to read data, and never touches your funds.
@@ -103,7 +103,7 @@ The same block works in any MCP client with stdio support (VS Code, Windsurf, Ze
 ### Check it works (no client, ~10 s)
 
 ```bash
-# List all 21 tools straight from the published package:
+# List all 23 tools straight from the published package:
 npx -y @modelcontextprotocol/inspector --cli npx -y flario --method tools/list
 
 # Or call one, a proof-carrying FLR/USD price on mainnet:
@@ -114,9 +114,9 @@ npx -y @modelcontextprotocol/inspector --cli npx -y flario \
 
 ---
 
-## Start here: five prompts, no Flare knowledge required
+## Start here: six prompts, no Flare knowledge required
 
-Tools answer questions. Prompts tell you what to ask in the first place. Flario ships five, and they show up in your MCP client's prompt list once it is connected — in Claude Desktop, the `+` menu in the message box.
+Tools answer questions. Prompts tell you what to ask in the first place. Flario ships six, and they show up in your MCP client's prompt list once it is connected — in Claude Desktop, the `+` menu in the message box.
 
 | Prompt | What it does |
 | --- | --- |
@@ -124,13 +124,40 @@ Tools answer questions. Prompts tell you what to ask in the first place. Flario 
 | **Verify a price without trusting anyone** | Reads one feed twice, plain and proof-carrying, then walks through exactly what earned the `verified: true` — which leaf, which fold, which contract the root came from. |
 | **Turn a web API into a provable fact** | Web2Json end to end, including the trap: a valid proof only proves the data came from the URL inside it, not that the URL deserves your trust. |
 | **Check FAssets system health** | A real risk read on live agent collateral against live prices, not a description of how FAssets works. |
+| **Prove what an agent acted on** | Bundles the facts behind a decision, then attacks the bundle so you can watch the verification catch a forged one. |
 | **Why Flare, for someone building agents** | The case for and against, grounded in calls rather than the marketing site, including where the ecosystem is weak. |
 
 Every prompt instructs the model to run the calls for real against the live network and then explain what happened, so you end up with actual numbers and a mental model at the same time. They are deliberately written to admit when something is not live yet rather than talk around it.
 
+## Prove what an agent acted on
+
+Every other tool here verifies a fact at the moment you ask, and then that verification evaporates — it survives as a sentence in a tool response nobody can re-check later. Evidence bundles close that gap.
+
+`evidence_bundle` collects proof-carrying facts into one portable object. `evidence_verify` is the receiving end: it rebuilds every leaf from its own body, folds it through its Merkle proof, and compares the result against `Relay.merkleRoots(protocol, round)` read on-chain right then. The person verifying does not have to trust the agent that produced the bundle, this server, the data-availability layer, or any API. They need an RPC endpoint and nothing else.
+
+Facts are verified *before* they go into a bundle. A fact that fails is refused, not flagged, because a bundle whose contents might be false is worse than no bundle at all. A Web2Json fact without `expect_source` is refused for the same reason — an unbound proof attests to whatever URL sits inside it.
+
+### The hash is not the security boundary
+
+`bundle_hash` is tamper-evidence. It catches accidental corruption and casual edits, and an attacker who edits a bundle on purpose can simply recompute it. That is fine, because the hash was never what held. Here is the interesting case, run for real on mainnet:
+
+```
+podmieniona wartosc 7116 -> 21348, hash przeliczony na nowo
+verified: false | bundle_hash_intact: true | facts_failed: 1
+reason: the proof does not fold to the on-chain FTSO Scaling root
+```
+
+The attacker tripled a price *and* recomputed the hash so the integrity check passes. Verification still fails, because producing a Merkle proof that folds to a root Flare's validators already signed is not something you can do by editing a JSON file.
+
+### What a bundle does not prove
+
+It does not prove the agent was honest about its reasoning, that these were the only facts it looked at, or that its conclusion follows from them. It proves that these specific facts were true, in these voting rounds. That is a narrower claim than "audit trail", and the narrowness is deliberate.
+
+It is also a different claim from the one most verifiable-tool-call work makes. Attesting that a server *executed correctly* — via TEE, ZK over execution, or a server signature — still asks you to trust the operator or their hardware. This attests to the *fact itself*, against consensus, which needs a chain where the oracle is part of the protocol rather than a contract someone deployed.
+
 ## Tools
 
-Every tool validates its input with [zod](https://zod.dev) and returns a clear error instead of crashing when an RPC call or data source is down. Nineteen tools are free. The two premium tools settle via [x402 on Flare](#how-payments-work-x402) when the operator turns it on, and are free otherwise.
+Every tool validates its input with [zod](https://zod.dev) and returns a clear error instead of crashing when an RPC call or data source is down. Twenty-one tools are free. The two premium tools settle via [x402 on Flare](#how-payments-work-x402) when the operator turns it on, and are free otherwise.
 
 | Tool | Networks | Tier | What it does |
 | --- | --- | --- | --- |
@@ -302,7 +329,7 @@ FLARIO_HTTP_HOST=0.0.0.0 npx flario --http 8402
 
 | Endpoint | What it serves |
 | --- | --- |
-| `POST /mcp` | The full MCP server over Streamable HTTP (stateless), all 21 tools, x402 in-band |
+| `POST /mcp` | The full MCP server over Streamable HTTP (stateless), all 23 tools, x402 in-band |
 | `GET /api/premium/liquidation-scanner?asset=FXRP&network=mainnet` | HTTP x402: `402` plus `accepts[]`, retry with the `X-Payment` header, get the result plus `X-Payment-Response` |
 | `POST /api/premium/proof-bundle` | Same x402 flow. Body: `{"requests":[{"voting_round_id":N,"abi_encoded_request":"0x..."}],"network":"..."}` |
 | `GET /` | Discovery: endpoints, x402 config, pricing |

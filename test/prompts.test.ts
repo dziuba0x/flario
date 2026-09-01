@@ -25,6 +25,7 @@ const EXPECTED = [
   "prove_a_web_fact",
   "fassets_health_check",
   "why_flare_for_agents",
+  "prove_what_you_acted_on",
 ];
 
 describe("MCP prompts", () => {
