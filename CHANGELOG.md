@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.0 (unreleased)
+- `flario-receipt/2`: `mandate_ref` (DELICTI) bound into the x402 receipt; v1 receipts keep verifying under their own version string.
+- Optional effector-side mandate gate: `DELICTI_REGISTRY`, `DELICTI_REQUIRE_MANDATE` (`src/x402/mandate.ts`).
+- Payload passthrough for `mandate_id` / `mandate_registry`.
+
 ## 1.6.0 (2026-09-01): watching Flare 2.0 arrive
 
 Flare's confidential compute went live on Coston on **2026-06-23** and Flare has

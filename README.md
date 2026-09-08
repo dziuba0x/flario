@@ -22,6 +22,20 @@ What Flario adds on top is a proof layer. In a typical x402 deployment, the clie
 
 ---
 
+
+## DELICTI: mandate before act
+
+flario is the first effector that speaks [DELICTI](https://github.com/dziuba0x/delicti). A paying agent may add `mandate_id` (and optionally `mandate_registry`) to its x402 payload; the server binds it into the receipt (`flario-receipt/2`, field `mandate_ref`) so any third party can check the deed against an on-chain mandate and, with Flare's FDC as second witness, prove a receipt false or a budget exceeded.
+
+Optional brake — set on the server:
+
+```
+DELICTI_REGISTRY=0x…        # MandateRegistry address on X402_NETWORK
+DELICTI_REQUIRE_MANDATE=1   # refuse payments that carry no mandate_id
+```
+
+With `DELICTI_REGISTRY` set, a payment whose mandate is not live, or whose payer is not the mandated agent, is refused before any funds move. Nothing here touches the EIP-712 authorization; a wrong mandate can never move funds, only get the deed refused or later proven false.
+
 ## Why Flario
 
 - **It goes deep on the protocols that are built into Flare.** FTSO, FDC, and FAssets are enshrined in the chain, and so are Flario's 24 tools. A generic multi-chain MCP server can't reach any of this, and the depth doesn't port to another chain.
