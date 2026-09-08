@@ -4,6 +4,16 @@
 - `flario-receipt/2`: `mandate_ref` (DELICTI) bound into the x402 receipt; v1 receipts keep verifying under their own version string.
 - Optional effector-side mandate gate: `DELICTI_REGISTRY`, `DELICTI_REQUIRE_MANDATE` (`src/x402/mandate.ts`).
 - Payload passthrough for `mandate_id` / `mandate_registry`.
+- **Fix:** the MCP (stdio) path built its receipt without `mandate_ref` while the
+  HTTP hub bound it, and the hub settled without the mandate gate while the MCP
+  path refused. Both paths now go through one constructor (`src/x402/emit.ts`)
+  and one gate, so a receipt from either effector is a DELICTI leaf and neither
+  moves funds under a dead or borrowed mandate.
+- **Fix:** a paid call whose tool handler then failed returned no receipt at all,
+  leaving a settled payment with no witness 1. The receipt is now attached to the
+  failure too.
+- `scripts/x402-agent.ts`: drives N paid MCP calls with a `mandate_id` and writes
+  the server's own receipts — witness 1 out of a real effector process.
 
 ## 1.6.0 (2026-09-01): watching Flare 2.0 arrive
 

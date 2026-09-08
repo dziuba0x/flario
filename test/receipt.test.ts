@@ -1,6 +1,6 @@
 // Tests for the ZK-ready receipt (organ 3). Crypto-critical: commitment
 // determinism, field reduction, no plaintext payer, tamper-evidence.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   buildReceipt,
   computePayerCommitment,
@@ -170,5 +170,61 @@ describe("DELICTI mandate_ref (flario-receipt/2)", () => {
     const p = { from: "0x0000000000000000000000000000000000000001" as const, to: "0x0000000000000000000000000000000000000002" as const, value: "1", validAfter: "0", validBefore: "1", nonce: "0x00" as const, v: 27, r: "0x00" as const, s: "0x00" as const };
     expect(mandateRefFor("coston2", p)).toBeNull();
     expect(mandateRefFor("coston2", { ...p, mandate_id: "1" })).toBeNull();
+  });
+});
+
+describe("receiptFor — one constructor for both effector paths", () => {
+  const settlement = {
+    tx_hash: "0x" + "ab".repeat(32),
+    block_number: "1",
+    payer: "0x00000000000000000000000000000000000000A2",
+    payee: "0x00000000000000000000000000000000000000A1",
+    amount_units: "1000000",
+    token: "0x9Eea43feA502609d0D88DAfd1d64B4e929BF18C2",
+    network: "coston2",
+  } as const;
+  const config = {
+    enabled: true,
+    network: "coston2",
+    tokenAddress: settlement.token,
+    payTo: settlement.payee,
+    eip712Version: "1",
+    tokenDecimals: 6,
+    defaultPrice: "1",
+    toolPrices: {},
+  } as const;
+  const payload = {
+    from: settlement.payer,
+    to: settlement.payee,
+    value: "1000000",
+    validAfter: "0",
+    validBefore: "9999999999",
+    nonce: ("0x" + "11".repeat(32)) as `0x${string}`,
+    v: 27,
+    r: ("0x" + "22".repeat(32)) as `0x${string}`,
+    s: ("0x" + "33".repeat(32)) as `0x${string}`,
+  };
+
+  afterEach(() => {
+    delete process.env.DELICTI_REGISTRY;
+  });
+
+  it("binds mandate_ref when the payer names a mandate and a registry is configured", async () => {
+    const { receiptFor } = await import("../src/x402/emit.js");
+    process.env.DELICTI_REGISTRY = "0x73109d769878cA2Cf0Ba180CF4f1a24b404F3f48";
+    const r = receiptFor(config as never, { ...payload, mandate_id: "7" } as never, settlement as never, "fassets_liquidation_scanner");
+    expect(r.mandate_ref).toEqual({
+      chain_id: 114,
+      registry: "0x73109d769878cA2Cf0Ba180CF4f1a24b404F3f48",
+      mandate_id: "7",
+    });
+    expect(r.settlement_tx_hash).toBe(settlement.tx_hash);
+  });
+
+  it("leaves mandate_ref null when the payer names no mandate", async () => {
+    const { receiptFor } = await import("../src/x402/emit.js");
+    process.env.DELICTI_REGISTRY = "0x73109d769878cA2Cf0Ba180CF4f1a24b404F3f48";
+    const r = receiptFor(config as never, payload as never, settlement as never, "fassets_liquidation_scanner");
+    expect(r.mandate_ref).toBeNull();
   });
 });

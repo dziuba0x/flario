@@ -21,8 +21,9 @@ import {
   type SettlementReceipt,
 } from "./x402/facilitator.js";
 import { decodePayload } from "./x402/paywall.js";
-import { buildReceipt, type Receipt } from "./x402/receipt.js";
-import { mandateRefFor } from "./x402/mandate.js";
+import { type Receipt } from "./x402/receipt.js";
+import { checkMandate } from "./x402/mandate.js";
+import { receiptFor } from "./x402/emit.js";
 import {
   liquidationScannerCore,
   bulkProofBundleCore,
@@ -99,18 +100,13 @@ async function handlePaidRest(
     try {
       const payload = decodePayload(header);
       await verifyPayment(config, toolName, payload);
+      // DELICTI brake, same as the MCP path: refuse before any funds move.
+      const gate = await checkMandate(config.network, payload);
+      if (!gate.ok) {
+        throw new Error(gate.reason ?? "DELICTI: mandate check failed");
+      }
       receipt = await settlePayment(config, payload);
-      zkReceipt = buildReceipt({
-        payer: payload.from,
-        payee: receipt.payee,
-        amount: receipt.amount_units,
-        asset: receipt.token,
-        network: receipt.network,
-        toolId: toolName,
-        settlementTxHash: receipt.tx_hash,
-        commitmentSalt: payload.commitment_salt,
-        mandateRef: mandateRefFor(config.network, payload),
-      });
+      zkReceipt = receiptFor(config, payload, receipt, toolName);
     } catch (err) {
       sendJson(res, 402, {
         error: `payment failed: ${err instanceof Error ? err.message : String(err)}`,

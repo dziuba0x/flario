@@ -18,8 +18,8 @@ import {
   settlePayment,
   type PaymentPayload,
 } from "./facilitator.js";
-import { buildReceipt } from "./receipt.js";
-import { checkMandate, mandateRefFor } from "./mandate.js";
+import { checkMandate } from "./mandate.js";
+import { receiptFor } from "./emit.js";
 
 type ToolResult = {
   isError?: boolean;
@@ -141,20 +141,22 @@ export function withX402<T>(
     }
 
     // ZK-ready, shareable receipt (payer only as a commitment); see receipt.ts.
-    const zkReceipt = buildReceipt({
-      payer: payload.from,
-      payee: receipt.payee,
-      amount: receipt.amount_units,
-      asset: receipt.token,
-      network: receipt.network,
-      toolId: toolName,
-      settlementTxHash: receipt.tx_hash,
-      commitmentSalt: payload.commitment_salt,
-    });
+    // Built by the shared constructor so the MCP path and the HTTP path can
+    // never disagree about what a receipt carries (notably `mandate_ref`).
+    const zkReceipt = receiptFor(config, payload, receipt, toolName);
 
     const result = await handler(rest);
     if (result.isError) {
-      return result;
+      // The funds already moved. Returning a bare error here would leave a paid
+      // deed with no receipt — from DELICTI's point of view a muscle moving with
+      // no signal, caused by us. Attach witness 1 to the failure too.
+      return {
+        ...result,
+        content: [
+          ...result.content,
+          { type: "text" as const, text: JSON.stringify({ x402_payment_receipt: receipt, x402_receipt: zkReceipt }, null, 2) },
+        ],
+      };
     }
     // Attach both the settlement summary (payer's own record) and the
     // canonical shareable receipt to the (JSON) tool output.
