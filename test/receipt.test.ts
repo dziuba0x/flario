@@ -138,3 +138,37 @@ describe("receipt_hash (keccak256 anchor / tamper-evidence)", () => {
     expect(receipt_hash).toBeDefined();
   });
 });
+
+describe("DELICTI mandate_ref (flario-receipt/2)", () => {
+  it("binds a mandate into the receipt and changes the hash", async () => {
+    const { buildReceipt, canonicalize } = await import("../src/x402/receipt.js");
+    const { mandateRefFor } = await import("../src/x402/mandate.js");
+    const base = {
+      payer: "0x34D940fb868dbac296311857903C6dA0cbb7C9F1" as const,
+      payee: "0x2222222222222222222222222222222222222222" as const,
+      amount: "1000000",
+      asset: "0x3333333333333333333333333333333333333333" as const,
+      network: "coston2" as const,
+      toolId: "fassets_liquidation_scanner",
+      settlementTxHash: ("0x" + "ab".repeat(32)) as `0x${string}`,
+      timestamp: 1788834046,
+    };
+    const ref = mandateRefFor("coston2", {
+      from: base.payer, to: base.payee, value: "1", validAfter: "0", validBefore: "1", nonce: "0x00", v: 27, r: "0x00", s: "0x00",
+      mandate_id: "4", mandate_registry: "0x52a61f0b9312042c514b0ac5c053747b0edf0c17",
+    });
+    expect(ref).toEqual({ chain_id: 114, registry: "0x52A61f0B9312042c514B0aC5C053747B0EdF0C17", mandate_id: "4" });
+    const without = buildReceipt(base);
+    const withRef = buildReceipt({ ...base, mandateRef: ref });
+    expect(without.mandate_ref).toBeNull();
+    expect(withRef.mandate_ref?.mandate_id).toBe("4");
+    expect(withRef.receipt_hash).not.toBe(without.receipt_hash);
+    expect(canonicalize(withRef)).toContain('"mandate_ref":{"chain_id":114');
+  });
+  it("mandateRefFor is null without an id or registry", async () => {
+    const { mandateRefFor } = await import("../src/x402/mandate.js");
+    const p = { from: "0x0000000000000000000000000000000000000001" as const, to: "0x0000000000000000000000000000000000000002" as const, value: "1", validAfter: "0", validBefore: "1", nonce: "0x00" as const, v: 27, r: "0x00" as const, s: "0x00" as const };
+    expect(mandateRefFor("coston2", p)).toBeNull();
+    expect(mandateRefFor("coston2", { ...p, mandate_id: "1" })).toBeNull();
+  });
+});

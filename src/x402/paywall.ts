@@ -19,6 +19,7 @@ import {
   type PaymentPayload,
 } from "./facilitator.js";
 import { buildReceipt } from "./receipt.js";
+import { checkMandate, mandateRefFor } from "./mandate.js";
 
 type ToolResult = {
   isError?: boolean;
@@ -62,6 +63,10 @@ export function decodePayload(b64: string): PaymentPayload {
     s: String(raw.s) as PaymentPayload["s"],
     ...(raw.commitment_salt !== undefined
       ? { commitment_salt: String(raw.commitment_salt) }
+      : {}),
+    ...(raw.mandate_id !== undefined ? { mandate_id: String(raw.mandate_id) } : {}),
+    ...(raw.mandate_registry !== undefined
+      ? { mandate_registry: String(raw.mandate_registry) as `0x${string}` }
       : {}),
   };
 }
@@ -118,6 +123,13 @@ export function withX402<T>(
 
     // Settle BEFORE running the tool: a paid call is only released once the
     // transfer is final on-chain (the settlement result carries the tx hash).
+    // DELICTI gate (optional): the effector is the final common pathway — a deed
+    // without a live mandate is "a muscle moving with no signal". Refuse before
+    // any funds move.
+    const gate = await checkMandate(config.network, payload);
+    if (!gate.ok) {
+      return textResult({ x402_error: gate.reason, delicti: gate }, true);
+    }
     let receipt;
     try {
       receipt = await settlePayment(config, payload);

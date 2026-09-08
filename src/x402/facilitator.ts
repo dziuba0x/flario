@@ -118,6 +118,11 @@ export interface PaymentPayload {
   // NOT part of the EIP-712 authorization signature, so it can never affect
   // fund movement — it only blinds the payer_commitment in the receipt.
   commitment_salt?: string;
+  // Optional DELICTI mandate the paying agent acts under (decimal id in the
+  // registry). Not part of the EIP-712 signature; it only binds the receipt to a
+  // mandate commitment and lets the effector refuse deeds without a live mandate.
+  mandate_id?: string;
+  mandate_registry?: `0x${string}`;
 }
 
 const CHAIN_IDS: Record<NetworkType, number> = {

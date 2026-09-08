@@ -22,6 +22,7 @@ import {
 } from "./x402/facilitator.js";
 import { decodePayload } from "./x402/paywall.js";
 import { buildReceipt, type Receipt } from "./x402/receipt.js";
+import { mandateRefFor } from "./x402/mandate.js";
 import {
   liquidationScannerCore,
   bulkProofBundleCore,
@@ -108,6 +109,7 @@ async function handlePaidRest(
         toolId: toolName,
         settlementTxHash: receipt.tx_hash,
         commitmentSalt: payload.commitment_salt,
+        mandateRef: mandateRefFor(config.network, payload),
       });
     } catch (err) {
       sendJson(res, 402, {

@@ -25,7 +25,7 @@ import { keccak256, toBytes, getAddress, type Hex } from "viem";
 import { poseidon2 } from "poseidon-lite";
 import type { NetworkType } from "../utils/rpc.js";
 
-export const RECEIPT_SCHEMA_VERSION = "flario-receipt/1" as const;
+export const RECEIPT_SCHEMA_VERSION = "flario-receipt/2" as const;
 export const COMMITMENT_SCHEME = "poseidon-bn254/v1" as const;
 export const HASH_SCHEME = "keccak256/v1" as const;
 
@@ -41,6 +41,19 @@ export interface FdcAttestationRef {
   voting_round_id: number;
   request_bytes: Hex;
   merkle_root: Hex;
+}
+
+/**
+ * DELICTI mandate reference: the on-chain commitment the payer's agent claims to
+ * act under (mandate-before-act). Binding it into the receipt makes the receipt a
+ * "witness 1" leaf a third party can check against MandateRegistry + FDC.
+ * See https://github.com/dziuba0x/delicti
+ */
+export interface MandateRef {
+  chain_id: number;
+  registry: `0x${string}`;
+  /** Decimal string mandate id in the registry. */
+  mandate_id: string;
 }
 
 export interface Receipt {
@@ -64,6 +77,8 @@ export interface Receipt {
   settlement_tx_hash: Hex;
   /** FDC Payment attestation proving the settlement; null until the FDC path runs. */
   fdc_attestation_ref: FdcAttestationRef | null;
+  /** DELICTI mandate the payer acted under; null when the payer supplied none. */
+  mandate_ref: MandateRef | null;
   /** keccak256 of the deterministic serialization of all fields above. */
   receipt_hash: Hex;
 }
@@ -125,6 +140,13 @@ export function canonicalize(receipt: Omit<Receipt, "receipt_hash">): string {
           merkle_root: receipt.fdc_attestation_ref.merkle_root.toLowerCase(),
         }
       : null,
+    mandate_ref: receipt.mandate_ref
+      ? {
+          chain_id: receipt.mandate_ref.chain_id,
+          registry: getAddress(receipt.mandate_ref.registry),
+          mandate_id: receipt.mandate_ref.mandate_id,
+        }
+      : null,
   };
   return JSON.stringify(ordered);
 }
@@ -140,6 +162,7 @@ export interface BuildReceiptParams {
   timestamp?: number;
   commitmentSalt?: string;
   fdcAttestationRef?: FdcAttestationRef | null;
+  mandateRef?: MandateRef | null;
 }
 
 export function buildReceipt(params: BuildReceiptParams): Receipt {
@@ -161,6 +184,7 @@ export function buildReceipt(params: BuildReceiptParams): Receipt {
     tool_id: params.toolId,
     settlement_tx_hash: params.settlementTxHash,
     fdc_attestation_ref: params.fdcAttestationRef ?? null,
+    mandate_ref: params.mandateRef ?? null,
   };
   const receipt_hash = keccak256(toBytes(canonicalize(base)));
   return { ...base, receipt_hash };

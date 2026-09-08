@@ -1,6 +1,6 @@
 # RECEIPT_SPEC.md: the Flario x402 settlement receipt
 
-Version: `flario-receipt/1`. Implementation: [`src/x402/receipt.ts`](src/x402/receipt.ts).
+Version: `flario-receipt/2` (v2 adds `mandate_ref`; v1 receipts stay verifiable under their own version string). Implementation: [`src/x402/receipt.ts`](src/x402/receipt.ts).
 
 Every settled x402 payment emits a **Receipt**: a fixed-schema, self-describing,
 ZK-ready artifact that records that a payment settled and a tool was paid for.
@@ -40,6 +40,7 @@ contract for that artifact. No ZK circuits are built here; the receipt is only
 | `tool_id` | string | Paid tool identifier (e.g. `fassets_liquidation_scanner`). |
 | `settlement_tx_hash` | `bytes32` hex | On-chain settlement transaction. |
 | `fdc_attestation_ref` | object \| null | FDC EVMTransaction attestation proving the settlement; `null` until the FDC-verified path has run (see below). |
+| `mandate_ref` | object \| null | [DELICTI](https://github.com/dziuba0x/delicti) mandate the paying agent acted under: `{ chain_id, registry, mandate_id }`. Supplied by the payer as `mandate_id` (+ optional `mandate_registry`) in the x402 payload; `null` when absent. With `DELICTI_REGISTRY` set on the server, the effector refuses payments whose mandate is not live or whose payer is not the mandated agent; `DELICTI_REQUIRE_MANDATE=1` refuses mandate-less payments altogether. |
 | `receipt_hash` | `bytes32` hex | keccak256 of the deterministic serialization of every field above. |
 
 `fdc_attestation_ref` (when present):
