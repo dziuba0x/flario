@@ -24,7 +24,10 @@ import { toHex } from "viem";
 import { EIP3009_TYPES } from "../src/x402/facilitator.js";
 
 const PAID_TOOL = process.env.PAID_TOOL ?? "fassets_liquidation_scanner";
-const TOOL_ARGS = JSON.parse(process.env.TOOL_ARGS_JSON ?? '{"asset":"FXRP"}') as Record<string, unknown>;
+const NETWORK = process.env.X402_NETWORK ?? "coston2";
+const TOOL_ARGS = JSON.parse(
+  process.env.TOOL_ARGS_JSON ?? JSON.stringify({ asset: "FXRP", network: NETWORK }),
+) as Record<string, unknown>;
 const N = Number(process.env.N ?? "1");
 const OUT_DIR = process.env.OUT_DIR ?? "./x402-out";
 const MANDATE_ID = process.env.MANDATE_ID ?? "";
@@ -60,7 +63,8 @@ function body(res: unknown): Record<string, unknown> {
 }
 
 // 1. Unpaid call → payment requirements.
-const req = (body(await client.callTool({ name: PAID_TOOL, arguments: TOOL_ARGS })).accepts as
+const first = body(await client.callTool({ name: PAID_TOOL, arguments: TOOL_ARGS }));
+const req = (first.accepts as
   | Array<{
       asset: `0x${string}`;
       payTo: `0x${string}`;
@@ -70,7 +74,11 @@ const req = (body(await client.callTool({ name: PAID_TOOL, arguments: TOOL_ARGS 
     }>
   | undefined)?.[0];
 if (!req) {
-  process.stderr.write("server did not ask for payment — is X402_ENABLED/X402_PAY_TO set?\n");
+  // Print what the server actually said: an argument-validation error from the
+  // tool looks identical to "x402 disabled" if you only check for `accepts`.
+  process.stderr.write(
+    `server did not ask for payment. Check X402_ENABLED/X402_PAY_TO and the tool args (PAID_TOOL/TOOL_ARGS_JSON).\nserver said: ${JSON.stringify(first).slice(0, 600)}\n`,
+  );
   process.exit(1);
 }
 const { getClient } = await import("../src/utils/rpc.js");

@@ -13,7 +13,8 @@
   leaving a settled payment with no witness 1. The receipt is now attached to the
   failure too.
 - `scripts/x402-agent.ts`: drives N paid MCP calls with a `mandate_id` and writes
-  the server's own receipts — witness 1 out of a real effector process.
+  the server's own receipts — witness 1 out of a real effector process. Executed
+  live against Coston2 on 2026-09-09 (5/5 paid, plus three refusals from the gate).
 
 ## 1.6.0 (2026-09-01): watching Flare 2.0 arrive
 
