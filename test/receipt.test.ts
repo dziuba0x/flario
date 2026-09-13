@@ -228,3 +228,37 @@ describe("receiptFor — one constructor for both effector paths", () => {
     expect(r.mandate_ref).toBeNull();
   });
 });
+
+describe("finaliseSettlement — the receipt must survive the tally write", () => {
+  afterEach(() => {
+    delete process.env.DELICTI_REGISTRY;
+    delete process.env.DELICTI_SPEND_METER;
+  });
+
+  it("still returns the receipt when no meter is configured", async () => {
+    const { finaliseSettlement } = await import("../src/x402/emit.js");
+    process.env.DELICTI_REGISTRY = "0x73109d769878cA2Cf0Ba180CF4f1a24b404F3f48";
+    const settlement = {
+      tx_hash: "0x" + "cd".repeat(32),
+      block_number: "2",
+      payer: "0x00000000000000000000000000000000000000A2",
+      payee: "0x00000000000000000000000000000000000000A1",
+      amount_units: "1000000",
+      token: "0x9Eea43feA502609d0D88DAfd1d64B4e929BF18C2",
+      network: "coston2",
+    };
+    const config = {
+      enabled: true, network: "coston2", tokenAddress: settlement.token, payTo: settlement.payee,
+      eip712Version: "1", tokenDecimals: 6, defaultPrice: "1", toolPrices: {},
+    };
+    const payload = {
+      from: settlement.payer, to: settlement.payee, value: "1000000", validAfter: "0",
+      validBefore: "9999999999", nonce: ("0x" + "11".repeat(32)) as `0x${string}`, v: 27,
+      r: ("0x" + "22".repeat(32)) as `0x${string}`, s: ("0x" + "33".repeat(32)) as `0x${string}`,
+      mandate_id: "9",
+    };
+    const r = finaliseSettlement(config as never, payload as never, settlement as never, "fassets_liquidation_scanner");
+    expect(r.mandate_ref?.mandate_id).toBe("9");
+    expect(r.settlement_tx_hash).toBe(settlement.tx_hash);
+  });
+});

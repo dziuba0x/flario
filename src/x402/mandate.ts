@@ -8,6 +8,9 @@
 // flario's role is "witness 1": the effector. Two things happen here.
 //   1. mandateRefFor()  — binds the payer-supplied mandate id into the receipt so
 //      the receipt becomes a DELICTI leaf (kind 2, EVM tx) a third party can check.
+//   3. noteSpend()      — the running tally (DELICTI_SPEND_METER). Read before the payment so
+//      structuring is refused while it is happening; written after, so the tally is a record of
+//      deeds rather than of intentions.
 //   2. checkMandate()   — OPTIONAL brake. If DELICTI_REGISTRY is set, the mandate
 //      must be live in that registry or the payment is refused before funds move.
 //      If DELICTI_REQUIRE_MANDATE=1, a payment with no mandate id is refused too:
@@ -16,7 +19,7 @@
 // Nothing here touches the EIP-712 authorization; a wrong mandate can never move
 // funds, it can only get the deed refused or later proven false.
 import { getAddress, type Hex } from "viem";
-import { getClient, type NetworkType } from "../utils/rpc.js";
+import { getClient, getSigner, type NetworkType } from "../utils/rpc.js";
 import type { PaymentPayload } from "./facilitator.js";
 import type { MandateRef } from "./receipt.js";
 
@@ -26,6 +29,36 @@ const CHAIN_IDS: Record<NetworkType, number> = {
   songbird: 19,
   coston: 16,
 };
+
+const METER_ABI = [
+  {
+    type: "function",
+    name: "wouldExceed",
+    stateMutability: "view",
+    inputs: [
+      { name: "id", type: "uint256" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    type: "function",
+    name: "headroom",
+    stateMutability: "view",
+    inputs: [{ name: "id", type: "uint256" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "note",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "id", type: "uint256" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+] as const;
 
 const REGISTRY_ABI = [
   {
@@ -59,6 +92,11 @@ const REGISTRY_ABI = [
     ],
   },
 ] as const;
+
+function meterAddress(): `0x${string}` | undefined {
+  const m = process.env.DELICTI_SPEND_METER as `0x${string}` | undefined;
+  return m ? getAddress(m) : undefined;
+}
 
 function registryFor(payload: PaymentPayload): `0x${string}` | undefined {
   const fromPayload = payload.mandate_registry;
@@ -108,7 +146,56 @@ export async function checkMandate(network: NetworkType, payload: PaymentPayload
   if (getAddress(m.agent) !== getAddress(payload.from)) {
     return { ok: false, reason: `DELICTI: payer ${payload.from} is not the agent bound by mandate #${id}`, ...base };
   }
+
+  // The running tally. This is the only part of DELICTI that can stop structuring while it is
+  // still happening: an eth_call, no transaction, no waiting on an attestation. Each slice of a
+  // salami is inside its own limit, so only the cumulative total can refuse the next one.
+  const meter = meterAddress();
+  if (meter) {
+    const amount = BigInt(payload.value);
+    const [exceeds, left] = await Promise.all([
+      client.readContract({ address: meter, abi: METER_ABI, functionName: "wouldExceed", args: [id, amount] }),
+      client.readContract({ address: meter, abi: METER_ABI, functionName: "headroom", args: [id] }),
+    ]);
+    if (exceeds) {
+      return {
+        ok: false,
+        reason: `DELICTI: mandate #${id} has ${left} of its budget left; this payment of ${amount} would exceed it`,
+        ...base,
+      };
+    }
+  }
   return { ok: true, ...base };
+}
+
+/**
+ * Record a settled payment against the mandate's running tally.
+ *
+ * Best-effort by design: the money has already moved, so a failure here must never turn a
+ * successful payment into an error for the payer. It is not free of consequence either — an
+ * effector whose tally falls behind what the FDC can prove is exactly what
+ * `Bond.challengeUnderReportedSpend` convicts. Silence here is a liability, not a shortcut.
+ */
+export async function noteSpend(network: NetworkType, payload: PaymentPayload, amount: string): Promise<void> {
+  const meter = meterAddress();
+  if (!meter || !payload.mandate_id) return;
+  const signer = getSigner(network);
+  if (!signer) {
+    process.stderr.write("DELICTI: no FLARE_PRIVATE_KEY, spend not recorded on the meter\n");
+    return;
+  }
+  try {
+    await signer.wallet.writeContract({
+      address: meter,
+      abi: METER_ABI,
+      functionName: "note",
+      args: [BigInt(payload.mandate_id), BigInt(amount)],
+      chain: null,
+      account: signer.account,
+    });
+  } catch (err) {
+    process.stderr.write(`DELICTI: failed to record spend on the meter: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 }
 
 export type { Hex };

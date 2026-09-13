@@ -23,7 +23,7 @@ import {
 import { decodePayload } from "./x402/paywall.js";
 import { type Receipt } from "./x402/receipt.js";
 import { checkMandate } from "./x402/mandate.js";
-import { receiptFor } from "./x402/emit.js";
+import { finaliseSettlement } from "./x402/emit.js";
 import {
   liquidationScannerCore,
   bulkProofBundleCore,
@@ -106,7 +106,7 @@ async function handlePaidRest(
         throw new Error(gate.reason ?? "DELICTI: mandate check failed");
       }
       receipt = await settlePayment(config, payload);
-      zkReceipt = receiptFor(config, payload, receipt, toolName);
+      zkReceipt = finaliseSettlement(config, payload, receipt, toolName);
     } catch (err) {
       sendJson(res, 402, {
         error: `payment failed: ${err instanceof Error ? err.message : String(err)}`,

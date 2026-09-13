@@ -19,7 +19,7 @@ import {
   type PaymentPayload,
 } from "./facilitator.js";
 import { checkMandate } from "./mandate.js";
-import { receiptFor } from "./emit.js";
+import { finaliseSettlement } from "./emit.js";
 
 type ToolResult = {
   isError?: boolean;
@@ -143,7 +143,7 @@ export function withX402<T>(
     // ZK-ready, shareable receipt (payer only as a commitment); see receipt.ts.
     // Built by the shared constructor so the MCP path and the HTTP path can
     // never disagree about what a receipt carries (notably `mandate_ref`).
-    const zkReceipt = receiptFor(config, payload, receipt, toolName);
+    const zkReceipt = finaliseSettlement(config, payload, receipt, toolName);
 
     const result = await handler(rest);
     if (result.isError) {

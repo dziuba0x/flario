@@ -8,8 +8,25 @@
 // constructor, one gate, no drift.
 import type { X402Config } from "./config.js";
 import type { PaymentPayload, SettlementReceipt } from "./facilitator.js";
-import { mandateRefFor } from "./mandate.js";
+import { mandateRefFor, noteSpend } from "./mandate.js";
 import { buildReceipt, type Receipt } from "./receipt.js";
+
+/**
+ * Everything that must happen once a payment has settled, in one place so the two effector
+ * paths cannot drift apart again: build the receipt, and record the spend on the mandate's
+ * running tally. The tally write is fire-and-forget — the funds already moved, so it must not
+ * be able to fail the call — but it is not optional in spirit: a tally that falls behind what
+ * the FDC can prove is what Bond.challengeUnderReportedSpend convicts.
+ */
+export function finaliseSettlement(
+  config: X402Config,
+  payload: PaymentPayload,
+  settlement: SettlementReceipt,
+  toolId: string,
+): Receipt {
+  void noteSpend(config.network, payload, settlement.amount_units);
+  return receiptFor(config, payload, settlement, toolId);
+}
 
 export function receiptFor(
   config: X402Config,

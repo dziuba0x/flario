@@ -1,6 +1,8 @@
 # Changelog
 
 ## 1.7.0 (unreleased)
+- **DELICTI spend meter (`DELICTI_SPEND_METER`).** Before settling, the effector reads the mandate's running tally (`wouldExceed`) and refuses a payment that would pass the cumulative budget — an `eth_call`, so the payment path stays fast. This is the only part of DELICTI that can stop structuring *while it is happening*: each slice is inside its own limit, so only the total can refuse the next one. After settling, the spend is recorded on the meter (`note`), fire-and-forget so a failed write can never turn a completed payment into an error for the payer.
+- `finaliseSettlement()` in `src/x402/emit.ts` is now the single post-settlement path for both the MCP and the HTTP effector — receipt plus tally, so the two cannot drift apart again.
 - `flario-receipt/2`: `mandate_ref` (DELICTI) bound into the x402 receipt; v1 receipts keep verifying under their own version string.
 - Optional effector-side mandate gate: `DELICTI_REGISTRY`, `DELICTI_REQUIRE_MANDATE` (`src/x402/mandate.ts`).
 - Payload passthrough for `mandate_id` / `mandate_registry`.
