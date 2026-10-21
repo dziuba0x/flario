@@ -51,6 +51,15 @@ proof for the wrong thing is rejected with a precise reason.
 `FLARIO_HUB_ALLOW_SUBMIT=true`, so an anonymous caller cannot spend the operator
 key that exists to settle payments (DECISIONS 14).
 
+**Example agent (2026-10-21).** `examples/tool-runner-agent/` runs Flario over stdio
+MCP and drives it with the Anthropic SDK tool runner (`mcpTools` plus
+`client.beta.messages.toolRunner`). Separate package, not published, read-only (the
+child process gets no `FLARE_PRIVATE_KEY` and no `X402_*`). Verified: typecheck
+clean, handshake and `tools/list` (24 tools) against a local build, tool-input
+validation and error propagation through the wrapper. **Not verified:** a full run
+against the live Messages API (no `ANTHROPIC_API_KEY` in that session) and a live
+RPC read through the wrapper (the sandbox blocked outbound RPC).
+
 ## Verified vs merely exposed
 
 This is the most important section for a new session. "Verified" means exercised

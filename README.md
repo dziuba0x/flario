@@ -58,6 +58,8 @@ Once Flario is in your MCP client (see [Install](#install)), you just ask in pla
 | "Prove this settlement actually happened, using Flare's FDC." | `fdc_verify_settlement` |
 | "Put this API's data on-chain with a proof, and only accept it from the host I trust." | `fdc_web2json_request` then `fdc_verify_web2json` |
 
+Want Flario inside your own agent instead of a chat client? [`examples/tool-runner-agent`](examples/tool-runner-agent) connects to it over stdio and lets the Anthropic SDK tool runner drive the loop in about a hundred lines.
+
 A proof-carrying price comes back with the value and a proof the agent can verify on its own (trimmed):
 
 ```json

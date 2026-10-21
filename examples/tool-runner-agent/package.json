@@ -1,0 +1,20 @@
+{
+  "name": "flario-tool-runner-example",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Example agent that drives Flario with the Anthropic SDK tool runner",
+  "type": "module",
+  "scripts": {
+    "start": "tsx agent.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.137.0",
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}
