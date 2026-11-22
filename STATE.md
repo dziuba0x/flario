@@ -4,18 +4,18 @@ Running project state, refreshed at the end of a session so the next one resumes
 with no context loss. Companions: CLAUDE.md (the brief), DECISIONS.md (why), and
 RECEIPT_SPEC.md (the receipt contract).
 
-Last updated: 2026-09-01, release 1.6.0 (Flare 2.0 deployment monitor).
+Last updated: 2026-11-22, release 1.7.0 (DELICTI mandate gate & spend meter).
 
 ## Snapshot (verified against the code)
 
-- Package **`flario` v1.6.0**. Published to npm under the bare name. Repo public at
+- Package **`flario` v1.7.0**. Published to npm under the bare name. Repo public at
   github.com/dziuba0x/flario. Command `npx flario`. MCP server name `flario`.
 - **24 tools** (22 free, 2 premium), **7 prompts**, **2 resources**. Prompts live in
   `src/prompts/onboarding.ts` and are the onboarding surface for a stranger.
-- Tools detail: 19 free, 2 premium (`fassets_liquidation_scanner`,
+- Tools detail: 22 free, 2 premium (`fassets_liquidation_scanner`,
   `fdc_bulk_proof_bundle`). Registration lives in `src/server.ts`; `src/index.ts` is
   only the entry point that chooses a transport.
-- **111 tests** green (`npm test`), plus a cold-start stdio smoke job in CI
+- **116 tests** green (`npm test`), plus a cold-start stdio smoke job in CI
   (`scripts/smoke-stdio.mjs`) that asserts the handshake and all three list
   endpoints with no env vars.
 - **Transports**: stdio (default) and hub mode (`--http [port]` or
@@ -23,7 +23,7 @@ Last updated: 2026-09-01, release 1.6.0 (Flare 2.0 deployment monitor).
   x402-paid REST endpoints. Hub binds `127.0.0.1` unless `FLARIO_HTTP_HOST` says
   otherwise.
 - **Networks**: mainnet (14), Coston2 (114), Songbird (19), Coston (16).
-- Receipt schema emitted by the code: **`flario-receipt/1`**.
+- Receipt schema emitted by the code: **`flario-receipt/2`** (with DELICTI `mandate_ref`, optional effector-side mandate gate via `DELICTI_REGISTRY` / `DELICTI_REQUIRE_MANDATE`, and real-time structuring refusal via `DELICTI_SPEND_METER`).
 
 ## What is built
 

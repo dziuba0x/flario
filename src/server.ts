@@ -77,7 +77,7 @@ import {
 import { registerOnboardingPrompts } from "./prompts/onboarding.js";
 
 
-export const SERVER_INFO = { name: "flario", version: "1.6.0" } as const;
+export const SERVER_INFO = { name: "flario", version: "1.7.0" } as const;
 
 export function buildServer(): McpServer {
   const server = new McpServer({ ...SERVER_INFO });
