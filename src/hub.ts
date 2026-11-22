@@ -4,7 +4,8 @@
 //                                        every Flario tool, x402 in-band
 //   GET  /api/premium/liquidation-scanner   x402 over real HTTP (spec-style):
 //   POST /api/premium/proof-bundle          402 + accepts → X-Payment header
-//                                           → result + X-Payment-Response
+//   GET  /api/premium/contract-sentinel     → result + X-Payment-Response
+//   POST /api/premium/market-truth
 //   GET  /healthz, GET /                 liveness + discovery
 //
 // The REST endpoints speak the same x402 payload encoding as the HTTP
@@ -28,6 +29,11 @@ import {
   liquidationScannerCore,
   bulkProofBundleCore,
 } from "./tools/premium.js";
+import { sentinelCore } from "./tools/sentinel.js";
+import {
+  marketTruthCore,
+  MAX_MARKET_TRUTH_FEEDS,
+} from "./tools/market-truth.js";
 import type { NetworkType } from "./utils/rpc.js";
 import { setHubMode } from "./utils/runtime.js";
 
@@ -200,11 +206,15 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       description:
         "Flario hub — Flare Network data + payments for AI agents. MCP over Streamable HTTP at POST /mcp; premium REST endpoints paid via x402 (EIP-3009 on Flare).",
       endpoints: {
-        mcp: "POST /mcp (MCP Streamable HTTP, stateless; all 21 tools)",
+        mcp: "POST /mcp (MCP Streamable HTTP, stateless; all 26 tools)",
         liquidation_scanner:
           "GET /api/premium/liquidation-scanner?asset=FXRP&network=mainnet&max_agents=50",
         proof_bundle:
           'POST /api/premium/proof-bundle {"requests":[{"voting_round_id":N,"abi_encoded_request":"0x…"}],"network":"coston2"}',
+        contract_sentinel:
+          "GET /api/premium/contract-sentinel?address=0x…&network=mainnet",
+        market_truth:
+          'POST /api/premium/market-truth {"feeds":["FLR/USD","XRP/USD"],"network":"mainnet"}',
         health: "GET /healthz",
       },
       x402: config
@@ -282,6 +292,93 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
         bulkProofBundleCore({
           requests,
           network: parseNetwork(typeof parsed.network === "string" ? parsed.network : null),
+        }),
+    );
+    return;
+  }
+
+  if (path === "/api/premium/contract-sentinel" && req.method === "GET") {
+    const address = url.searchParams.get("address");
+    if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      sendJson(res, 400, {
+        error: 'query param "address" must be a 20-byte 0x-prefixed EVM address',
+      });
+      return;
+    }
+    await handlePaidRest(
+      req,
+      res,
+      "flare_contract_sentinel",
+      `${url.origin}${path}`,
+      () =>
+        sentinelCore({
+          address,
+          network: parseNetwork(url.searchParams.get("network")),
+        }),
+    );
+    return;
+  }
+
+  if (path === "/api/premium/market-truth" && req.method === "POST") {
+    let parsed: {
+      feeds?: unknown;
+      network?: unknown;
+      voting_round_id?: unknown;
+      claim_note?: unknown;
+    };
+    try {
+      parsed = JSON.parse(await readBody(req)) as typeof parsed;
+    } catch {
+      sendJson(res, 400, { error: "invalid JSON body" });
+      return;
+    }
+    const feeds = Array.isArray(parsed.feeds) ? parsed.feeds : null;
+    if (
+      !feeds ||
+      feeds.length === 0 ||
+      feeds.length > MAX_MARKET_TRUTH_FEEDS ||
+      !feeds.every((f: unknown): f is string => typeof f === "string" && f.trim().length > 0)
+    ) {
+      sendJson(res, 400, {
+        error: `body must include non-empty "feeds" array of 1–${MAX_MARKET_TRUTH_FEEDS} feed names or bytes21 ids`,
+      });
+      return;
+    }
+    let votingRoundId: number | undefined;
+    if (parsed.voting_round_id !== undefined) {
+      if (
+        typeof parsed.voting_round_id !== "number" ||
+        !Number.isInteger(parsed.voting_round_id) ||
+        parsed.voting_round_id <= 0
+      ) {
+        sendJson(res, 400, {
+          error: '"voting_round_id" must be a positive integer when provided',
+        });
+        return;
+      }
+      votingRoundId = parsed.voting_round_id;
+    }
+    let claimNote: string | undefined;
+    if (parsed.claim_note !== undefined) {
+      if (typeof parsed.claim_note !== "string" || parsed.claim_note.length > 500) {
+        sendJson(res, 400, {
+          error: '"claim_note" must be a string of at most 500 characters when provided',
+        });
+        return;
+      }
+      claimNote = parsed.claim_note;
+    }
+    await handlePaidRest(
+      req,
+      res,
+      "market_truth_bundle",
+      `${url.origin}${path}`,
+      () =>
+        marketTruthCore({
+          feeds,
+          network: parseNetwork(typeof parsed.network === "string" ? parsed.network : null),
+          ...(votingRoundId !== undefined ? { voting_round_id: votingRoundId } : {}),
+          ...(claimNote !== undefined ? { claim_note: claimNote } : {}),
         }),
     );
     return;

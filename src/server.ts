@@ -75,6 +75,8 @@ import {
   evidenceVerifyInput,
 } from "./tools/evidence.js";
 import { registerOnboardingPrompts } from "./prompts/onboarding.js";
+import { registerSentinelTool } from "./tools/sentinel.js";
+import { registerMarketTruthTool } from "./tools/market-truth.js";
 
 
 export const SERVER_INFO = { name: "flario", version: "1.7.0" } as const;
@@ -249,6 +251,9 @@ server.tool(
   evidenceVerifyInput,
   evidenceVerify,
 );
+
+registerSentinelTool(server);
+registerMarketTruthTool(server);
 
 registerNetworkResources(server);
   registerOnboardingPrompts(server);

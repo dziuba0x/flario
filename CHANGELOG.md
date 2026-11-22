@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.8.0 (unreleased)
+- **`flare_contract_sentinel`** (new, premium x402): static EVM bytecode & proxy risk analyzer for any address on Flare (`mainnet`, `coston2`, `songbird`, `coston`). Detects EOA vs contract, EIP-1167 minimal proxies and EIP-1967 implementation/admin slots, PUSH-safe opcode counts (`SELFDESTRUCT`, `DELEGATECALL`, `CREATE2`, `CREATE`, `ORIGIN`), common function selectors (`ERC-20`, `EIP-3009`, `Ownable`, `Pausable`, `Upgradeable`, `Mintable`, `Burnable`), and returns a deterministic `0–100` risk score with red flags. Exposed over MCP (`flare_contract_sentinel`) and REST (`GET /api/premium/contract-sentinel`).
+- **`market_truth_bundle`** (new, premium x402): builds a tamper-evident Proof-of-Market-Truth FTSO anchor certificate (`flario-market-truth/1`) aggregating 1–8 locally Merkle-verified FTSO Scaling anchor feeds against the on-chain Relay root (`protocol 100`), bound by a canonical-JSON `keccak256` `certificate_hash` with offline verification (`verifyMarketTruthCertificate`). Exposed over MCP (`market_truth_bundle`) and REST (`POST /api/premium/market-truth`).
+- **x402 optimization**: HTTP `402` and MCP payment requirements now include `extra.eip712.name` (resolved and cached from the payment token) so x402 clients can sign EIP-3009 authorizations without an extra RPC round-trip.
+- **FAssets liquidation scanner**: parallelized agent reads and added Vault-Defense metrics (`liability_usd`, `topup_to_safe_usd`, `liquidated_at_20pct_shock`).
+- 26 tools (22 free, 4 premium), 7 prompts, 2 resources.
+
 ## 1.7.0 (2026-11-22): DELICTI mandate gate & spend meter
 - **DELICTI spend meter (`DELICTI_SPEND_METER`).** Before settling, the effector reads the mandate's running tally (`wouldExceed`) and refuses a payment that would pass the cumulative budget — an `eth_call`, so the payment path stays fast. This is the only part of DELICTI that can stop structuring *while it is happening*: each slice is inside its own limit, so only the total can refuse the next one. After settling, the spend is recorded on the meter (`note`), fire-and-forget so a failed write can never turn a completed payment into an error for the payer.
 - `finaliseSettlement()` in `src/x402/emit.ts` is now the single post-settlement path for both the MCP and the HTTP effector — receipt plus tally, so the two cannot drift apart again.

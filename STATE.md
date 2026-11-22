@@ -4,18 +4,18 @@ Running project state, refreshed at the end of a session so the next one resumes
 with no context loss. Companions: CLAUDE.md (the brief), DECISIONS.md (why), and
 RECEIPT_SPEC.md (the receipt contract).
 
-Last updated: 2026-11-22, release 1.7.0 (DELICTI mandate gate & spend meter).
+Last updated: 2026-11-22, release 1.8.0 (unreleased — Contract Sentinel & Market-Truth Bundle).
 
 ## Snapshot (verified against the code)
 
-- Package **`flario` v1.7.0**. Published to npm under the bare name. Repo public at
+- Package **`flario` v1.7.0** (1.8.0 unreleased on branch). Published to npm under the bare name. Repo public at
   github.com/dziuba0x/flario. Command `npx flario`. MCP server name `flario`.
-- **24 tools** (22 free, 2 premium), **7 prompts**, **2 resources**. Prompts live in
+- **26 tools** (22 free, 4 premium), **7 prompts**, **2 resources**. Prompts live in
   `src/prompts/onboarding.ts` and are the onboarding surface for a stranger.
-- Tools detail: 22 free, 2 premium (`fassets_liquidation_scanner`,
-  `fdc_bulk_proof_bundle`). Registration lives in `src/server.ts`; `src/index.ts` is
+- Tools detail: 22 free, 4 premium (`fassets_liquidation_scanner`,
+  `fdc_bulk_proof_bundle`, `flare_contract_sentinel`, `market_truth_bundle`). Registration lives in `src/server.ts`; `src/index.ts` is
   only the entry point that chooses a transport.
-- **116 tests** green (`npm test`), plus a cold-start stdio smoke job in CI
+- **143 tests** green (`npm test`), plus a cold-start stdio smoke job in CI
   (`scripts/smoke-stdio.mjs`) that asserts the handshake and all three list
   endpoints with no env vars.
 - **Transports**: stdio (default) and hub mode (`--http [port]` or
