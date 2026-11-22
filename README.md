@@ -38,7 +38,7 @@ With `DELICTI_REGISTRY` set, a payment whose mandate is not live, or whose payer
 
 ## Why Flario
 
-- **It goes deep on the protocols that are built into Flare.** FTSO, FDC, and FAssets are enshrined in the chain, and so are Flario's 24 tools. A generic multi-chain MCP server can't reach any of this, and the depth doesn't port to another chain.
+- **It goes deep on the protocols that are built into Flare.** FTSO, FDC, and FAssets are enshrined in the chain, and so are Flario's 27 tools. A generic multi-chain MCP server can't reach any of this, and the depth doesn't port to another chain.
 - **Answers carry a proof, so you don't have to take my word for it.** Prices and cross-chain facts come with a Merkle proof that Flario checks locally against the on-chain root. An agent, or even a smart contract, can rely on the answer without trusting any API.
 - **Agents can pay, and they get a receipt.** Premium tools settle per call over [x402](https://www.x402.org/) on Flare, and each payment returns a portable receipt that Flare's own FDC can prove, not just the facilitator's word for it. No other chain in the x402 ecosystem can do that today.
 - **Self-hostable, no custody.** It runs on public RPCs, asks for no account or key to read data, and never touches your funds.
@@ -57,6 +57,9 @@ Once Flario is in your MCP client (see [Install](#install)), you just ask in pla
 | "Who runs FXRP agent `0x...`?" | `fassets_agent_details` |
 | "Prove this settlement actually happened, using Flare's FDC." | `fdc_verify_settlement` |
 | "Put this API's data on-chain with a proof, and only accept it from the host I trust." | `fdc_web2json_request` then `fdc_verify_web2json` |
+| "Scan contract `0x...` on Flare for proxy traps, dangerous opcodes, and ERC-20/EIP-3009 selectors." | `flare_contract_sentinel` |
+| "Package Merkle-verified FLR/USD and BTC/USD anchor prices into a tamper-evident Proof-of-Market-Truth certificate." | `market_truth_bundle` |
+| "Verify this `flario-market-truth/1` certificate offline without making any RPC calls." | `verify_market_truth` |
 
 A proof-carrying price comes back with the value and a proof the agent can verify on its own (trimmed):
 
@@ -117,7 +120,7 @@ The same block works in any MCP client with stdio support (VS Code, Windsurf, Ze
 ### Check it works (no client, ~10 s)
 
 ```bash
-# List all 24 tools straight from the published package:
+# List all 27 tools straight from the published package:
 npx -y @modelcontextprotocol/inspector --cli npx -y flario --method tools/list
 
 # Or call one, a proof-carrying FLR/USD price on mainnet:
@@ -197,7 +200,7 @@ It is also a different claim from the one most verifiable-tool-call work makes. 
 
 ## Tools
 
-Every tool validates its input with [zod](https://zod.dev) and returns a clear error instead of crashing when an RPC call or data source is down. Twenty-two tools are free. The two premium tools settle via [x402 on Flare](#how-payments-work-x402) when the operator turns it on, and are free otherwise.
+Every tool validates its input with [zod](https://zod.dev) and returns a clear error instead of crashing when an RPC call or data source is down. Twenty-three tools are free. The four premium tools settle via [x402 on Flare](#how-payments-work-x402) when the operator turns it on, and are free otherwise.
 
 | Tool | Networks | Tier | What it does |
 | --- | --- | --- | --- |
@@ -220,8 +223,11 @@ Every tool validates its input with [zod](https://zod.dev) and returns a clear e
 | `fdc_verify_settlement` | mainnet, coston2, songbird, coston | Free | Prove an x402 settlement via enshrined FDC (EVMTransaction attestation) and bind it to the payment |
 | `fdc_web2json_request` | mainnet, coston2, songbird, coston | Free | Turn any public web API into a verifiable fact: URL plus jq filter plus ABI signature, prepared through a Flare verifier |
 | `fdc_verify_web2json` | mainnet, coston2, songbird, coston | Free | Verify a Web2Json proof locally AND bind it to the source you expected, then decode the payload |
+| `verify_market_truth` | offline (no network) | Free | Offline verifier for `flario-market-truth/1` certificates: checks schema, Merkle proof presence, and `certificate_hash` |
 | `fassets_liquidation_scanner` | mainnet, coston2, songbird | Premium (x402) | FAssets agents joined with live FTSO prices: per-agent liquidation price and how far away it is |
 | `fdc_bulk_proof_bundle` | mainnet, coston2, songbird, coston | Premium (x402) | Batch fetch and local verification of up to 20 FDC proofs |
+| `flare_contract_sentinel` | mainnet, coston2, songbird, coston | Premium (x402) | Static EVM bytecode & auto-unwrapped EIP-1967/1167 proxy risk analyzer (opcodes, selectors, `0–100` risk score) |
+| `market_truth_bundle` | mainnet, coston2, songbird, coston | Premium (x402) | Tamper-evident `flario-market-truth/1` certificate bundling 1–8 Merkle-verified FTSO anchor feeds |
 
 Notes on a few tools:
 
@@ -369,9 +375,11 @@ FLARIO_HTTP_HOST=0.0.0.0 npx flario --http 8402
 
 | Endpoint | What it serves |
 | --- | --- |
-| `POST /mcp` | The full MCP server over Streamable HTTP (stateless), all 24 tools, x402 in-band |
+| `POST /mcp` | The full MCP server over Streamable HTTP (stateless), all 27 tools, x402 in-band |
 | `GET /api/premium/liquidation-scanner?asset=FXRP&network=mainnet` | HTTP x402: `402` plus `accepts[]`, retry with the `X-Payment` header, get the result plus `X-Payment-Response` |
 | `POST /api/premium/proof-bundle` | Same x402 flow. Body: `{"requests":[{"voting_round_id":N,"abi_encoded_request":"0x..."}],"network":"..."}` |
+| `GET /api/premium/contract-sentinel?address=0x...&network=mainnet` | Same x402 flow: static bytecode & auto-proxy unwrap risk analysis |
+| `POST /api/premium/market-truth` | Same x402 flow. Body: `{"feeds":["FLR/USD","BTC/USD"],"network":"mainnet"}` |
 | `GET /` | Discovery: endpoints, x402 config, pricing |
 | `GET /healthz` | Liveness |
 

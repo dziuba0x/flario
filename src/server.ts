@@ -79,7 +79,7 @@ import { registerSentinelTool } from "./tools/sentinel.js";
 import { registerMarketTruthTool } from "./tools/market-truth.js";
 
 
-export const SERVER_INFO = { name: "flario", version: "1.7.0" } as const;
+export const SERVER_INFO = { name: "flario", version: "1.8.0" } as const;
 
 export function buildServer(): McpServer {
   const server = new McpServer({ ...SERVER_INFO });

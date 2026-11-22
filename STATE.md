@@ -4,18 +4,18 @@ Running project state, refreshed at the end of a session so the next one resumes
 with no context loss. Companions: CLAUDE.md (the brief), DECISIONS.md (why), and
 RECEIPT_SPEC.md (the receipt contract).
 
-Last updated: 2026-11-22, release 1.8.0 (unreleased — Contract Sentinel & Market-Truth Bundle).
+Last updated: 2026-11-22, release 1.8.0 (DeFi Sentinel, Auto-Proxy Unwrap & Proof-of-Market-Truth).
 
 ## Snapshot (verified against the code)
 
-- Package **`flario` v1.7.0** (1.8.0 unreleased on branch). Published to npm under the bare name. Repo public at
+- Package **`flario` v1.8.0**. Published to npm under the bare name. Repo public at
   github.com/dziuba0x/flario. Command `npx flario`. MCP server name `flario`.
-- **26 tools** (22 free, 4 premium), **7 prompts**, **2 resources**. Prompts live in
+- **27 tools** (23 free, 4 premium x402), **7 prompts**, **2 resources**. Prompts live in
   `src/prompts/onboarding.ts` and are the onboarding surface for a stranger.
-- Tools detail: 22 free, 4 premium (`fassets_liquidation_scanner`,
+- Tools detail: 23 free (including offline `verify_market_truth`), 4 premium (`fassets_liquidation_scanner`,
   `fdc_bulk_proof_bundle`, `flare_contract_sentinel`, `market_truth_bundle`). Registration lives in `src/server.ts`; `src/index.ts` is
   only the entry point that chooses a transport.
-- **143 tests** green (`npm test`), plus a cold-start stdio smoke job in CI
+- **152 tests** green (`npm test`), plus a cold-start stdio smoke job in CI
   (`scripts/smoke-stdio.mjs`) that asserts the handshake and all three list
   endpoints with no env vars.
 - **Transports**: stdio (default) and hub mode (`--http [port]` or
@@ -72,6 +72,8 @@ or reachable through a tool signature.
 | Receipt emission and hash | Coston2 tx `0xb380...9184`, blinded commitment, hash verified |
 | FAssets reads | mainnet, Coston2, Songbird (FXRP) |
 | Portfolio and agent identity reads | mainnet |
+| `flare_contract_sentinel` + auto-proxy unwrap | Mainnet USD₮0 (`0xe7cd...C82D`) automatically unwrapped `EIP-1967 -> 0x779Ded...3736` (`impl_bytecode=17207B`, 10 detected selectors incl. ERC-20, EIP-3009, Ownable, Mintable, Burnable), verified via `scripts/live-v18-check.ts` |
+| `market_truth_bundle` + `verify_market_truth` | Coston2 live anchor feeds bundled into `flario-market-truth/1`, locally Merkle-verified against Relay and offline hash-verified (`valid=true`), verified via `scripts/live-v18-check.ts` |
 
 **Exposed but not verified by us**
 
@@ -94,9 +96,7 @@ and later: `flr` on Coston2 is verified. `eth` and `sgb` remain unverified.
 - **Mainnet x402 has never run.** Before enabling it, exercise one settlement on
   mainnet with a small amount, and set `X402_PAY_TO` to the production address
   recorded in `.env` as `X402_PAY_TO_PRODUCTION`.
-- **No test asserts the receipt `schema_version` string literally.** The existing
-  test compares against the imported constant, so it cannot catch a spec drift like
-  the one this sync just fixed. Adding a literal assertion would close that.
+- ~~**No test asserts the receipt `schema_version` string literally.**~~ Closed: `test/receipt.test.ts` asserts literal `"flario-receipt/2"` and `test/market-truth.test.ts` asserts literal `"flario-market-truth/1"`.
 - **No demo recording yet.** The operator records it; `scripts/x402-demo-client.ts`
   is the scenario.
 - **FCC watch.** flare-foundation is actively pushing `tee-proxy`, `tee-node` and
