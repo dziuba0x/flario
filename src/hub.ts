@@ -206,7 +206,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       description:
         "Flario hub — Flare Network data + payments for AI agents. MCP over Streamable HTTP at POST /mcp; premium REST endpoints paid via x402 (EIP-3009 on Flare).",
       endpoints: {
-        mcp: "POST /mcp (MCP Streamable HTTP, stateless; all 26 tools)",
+        mcp: "POST /mcp (MCP Streamable HTTP, stateless; all 27 tools)",
         liquidation_scanner:
           "GET /api/premium/liquidation-scanner?asset=FXRP&network=mainnet&max_agents=50",
         proof_bundle:

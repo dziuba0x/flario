@@ -53,7 +53,7 @@ describe("hub HTTP endpoints", () => {
     expect(res.status).toBe(200);
   });
 
-  it("lists all 26 tools over MCP Streamable HTTP", async () => {
+  it("lists all 27 tools over MCP Streamable HTTP", async () => {
     const res = await fetch(`${BASE}/mcp`, {
       method: "POST",
       headers: {
@@ -64,12 +64,13 @@ describe("hub HTTP endpoints", () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { result: { tools: Array<{ name: string }> } };
-    expect(body.result.tools.length).toBe(26);
+    expect(body.result.tools.length).toBe(27);
     const names = body.result.tools.map((t) => t.name);
     expect(names).toContain("fassets_liquidation_scanner");
     expect(names).toContain("fdc_request_attestation");
     expect(names).toContain("flare_contract_sentinel");
     expect(names).toContain("market_truth_bundle");
+    expect(names).toContain("verify_market_truth");
     // Hub mode must expose the evidence tools too: a bundle is most useful
     // when the party verifying it is reaching a hosted endpoint, not stdio.
     expect(names).toContain("evidence_bundle");

@@ -49,6 +49,7 @@ async function runSentinelCheck(
   label: string,
   address: string,
   network: "coston2" | "mainnet",
+  options?: { requireUnwrappedSelectors?: boolean },
 ): Promise<void> {
   const t0 = performance.now();
   try {
@@ -64,15 +65,25 @@ async function runSentinelCheck(
       typeof data.proxy_type === "string" &&
       Array.isArray(data.detected_selectors);
 
+    const selectorsOk = options?.requireUnwrappedSelectors
+      ? data.detected_selectors.length > 0 &&
+        data.implementation_analysis != null &&
+        data.implementation_analysis.bytecode_bytes > 0
+      : true;
+
     const proxyDetail =
       data.proxy_type !== "NONE" && data.proxy_implementation
         ? `${data.proxy_type} -> ${data.proxy_implementation}`
         : data.proxy_type;
 
+    const implDetail = data.implementation_analysis
+      ? ` | impl_bytecode=${data.implementation_analysis.bytecode_bytes}B (impl_selectors=${data.implementation_analysis.detected_selectors.length})`
+      : "";
+
     check(
       label,
-      validShape,
-      `${elapsedMs}ms | risk_score=${data.risk_score} (${data.risk_level}) | proxy_type=${proxyDetail} | bytecode=${data.bytecode_bytes}B | detected_selectors=[${formatSelectors(data.detected_selectors)}]`,
+      validShape && selectorsOk,
+      `${elapsedMs}ms | risk_score=${data.risk_score} (${data.risk_level}) | proxy_type=${proxyDetail} | bytecode=${data.bytecode_bytes}B${implDetail} | detected_selectors(${data.detected_selectors.length})=[${formatSelectors(data.detected_selectors)}]`,
     );
   } catch (err) {
     const elapsedMs = Math.round(performance.now() - t0);
@@ -134,6 +145,7 @@ async function main(): Promise<void> {
     "sentinel mainnet USD₮0 (0xe7cd…C82D)",
     "0xe7cd86e13AC4309349F30B3435a9d337750fC82D",
     "mainnet",
+    { requireUnwrappedSelectors: true },
   );
 
   await runMarketTruthCheck();

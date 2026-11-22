@@ -2,6 +2,7 @@
 import { describe, it, expect } from "vitest";
 import {
   analyzeBytecodeRisk,
+  mergeProxyAndImplRisk,
   EIP1967_ADMIN_SLOT,
   EIP1967_IMPLEMENTATION_SLOT,
   flareContractSentinelInput,
@@ -210,5 +211,107 @@ describe("flare_contract_sentinel: analyzeBytecodeRisk", () => {
     expect(flareContractSentinelInput.address).toBeDefined();
     expect(flareContractSentinelInput.network).toBeDefined();
     expect(flareContractSentinelInput.x402_payment).toBeDefined();
+  });
+});
+
+describe("flare_contract_sentinel: mergeProxyAndImplRisk", () => {
+  it("merges an EIP-1967 proxy with a clean ERC-20 + EIP-3009 implementation and attaches implementation_analysis", () => {
+    const proxyCode =
+      "0x366000803760008036600073deadbeefdeadbeefdeadbeefdeadbeefdeadbeef5af400";
+    const implSlot =
+      "0x000000000000000000000000779ded0c9e1022225f8e0630b35a9b54be713736";
+    const proxyAnalysis = analyzeBytecodeRisk(proxyCode, { eip1967Impl: implSlot });
+    expect(proxyAnalysis.detected_selectors).toEqual([]);
+    expect(proxyAnalysis.risk_score).toBe(30); // 15 (delegatecall) + 15 (EIP-1967)
+
+    // Clean implementation exposing ERC-20 transfer + EIP-3009 transferWithAuthorization (v,r,s)
+    const implCode = "0x63a9059cbb63e3ee160e00";
+    const implAnalysis = analyzeBytecodeRisk(implCode);
+
+    const merged = mergeProxyAndImplRisk(proxyAnalysis, implAnalysis);
+    expect(merged.proxy_type).toBe("EIP-1967");
+    expect(merged.proxy_implementation).toBe("0x779Ded0c9e1022225f8E0630b35a9b54bE713736");
+    expect(merged.risk_score).toBe(30);
+    expect(merged.risk_level).toBe("MEDIUM");
+    expect(merged.detected_selectors.map((s) => s.selector)).toEqual([
+      "0xa9059cbb",
+      "0xe3ee160e",
+    ]);
+    expect(merged.implementation_analysis).toBeDefined();
+    expect(merged.implementation_analysis?.is_contract).toBe(true);
+    expect(merged.implementation_analysis?.bytecode_bytes).toBe(11);
+    expect(merged.implementation_analysis?.detected_selectors).toHaveLength(2);
+    expect(merged.implementation_analysis?.red_flags).toEqual([]);
+  });
+
+  it("escalates risk to HIGH/CRITICAL when a proxy hides SELFDESTRUCT and ORIGIN in its implementation", () => {
+    const implLower = "1111111111111111111111111111111111111111";
+    const eip1167 = `0x363d3d373d3d3d363d73${implLower}5af43d82803e903d91602b57fd5bf3`;
+    const proxyAnalysis = analyzeBytecodeRisk(eip1167);
+    expect(proxyAnalysis.risk_score).toBe(25);
+    expect(proxyAnalysis.risk_level).toBe("MEDIUM");
+
+    // Malicious implementation with SELFDESTRUCT (0xff) and ORIGIN (0x32)
+    const maliciousImpl = analyzeBytecodeRisk("0x326000ff00");
+    const merged = mergeProxyAndImplRisk(proxyAnalysis, maliciousImpl);
+
+    // 25 (EIP-1167) + 45 (SELFDESTRUCT) + 20 (ORIGIN) = 90 -> CRITICAL
+    expect(merged.risk_score).toBe(90);
+    expect(merged.risk_level).toBe("CRITICAL");
+    expect(merged.verdict).toMatch(/Critical risk/i);
+    expect(
+      merged.red_flags.some((f) => f.includes("[Implementation]") && f.includes("SELFDESTRUCT")),
+    ).toBe(true);
+    expect(
+      merged.red_flags.some((f) => f.includes("[Implementation]") && f.includes("ORIGIN")),
+    ).toBe(true);
+    expect(merged.implementation_analysis?.opcodes.selfdestruct).toBe(1);
+    expect(merged.implementation_analysis?.opcodes.origin).toBe(1);
+  });
+
+  it("deduplicates overlapping selectors and avoids double-counting shared selector risk penalties", () => {
+    // Proxy shell containing upgradeTo (3659cfe6) and owner (8da5cb5b) + DELEGATECALL
+    const proxyCode = "0x633659cfe6638da5cb5b5af400";
+    const proxyAnalysis = analyzeBytecodeRisk(proxyCode, {
+      eip1967Impl: "0x000000000000000000000000abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    });
+    // 15 (delegatecall) + 15 (EIP-1967) + 15 (upgradeTo) + 5 (owner) = 50
+    expect(proxyAnalysis.risk_score).toBe(50);
+
+    // Implementation also has upgradeTo (3659cfe6) and owner (8da5cb5b), plus mint (40c10f19) & transfer (a9059cbb)
+    const implCode = "0x633659cfe6638da5cb5b6340c10f1963a9059cbb00";
+    const implAnalysis = analyzeBytecodeRisk(implCode);
+
+    const merged = mergeProxyAndImplRisk(proxyAnalysis, implAnalysis);
+    const selectors = merged.detected_selectors.map((s) => s.selector);
+
+    expect(selectors).toEqual([
+      "0x8da5cb5b",
+      "0x3659cfe6",
+      "0xa9059cbb",
+      "0x40c10f19",
+    ]);
+    expect(new Set(selectors).size).toBe(selectors.length);
+    // Only mint (+10) is newly added; upgradeTo and owner were already counted on proxy shell.
+    expect(merged.risk_score).toBe(60);
+    expect(merged.risk_level).toBe("HIGH");
+  });
+
+  it("flags a proxy pointing to an empty/EOA implementation and clamps risk_score within [0, 100]", () => {
+    const proxyCode =
+      "0x366000803760008036600073deadbeefdeadbeefdeadbeefdeadbeefdeadbeef5af400";
+    const proxyAnalysis = analyzeBytecodeRisk(proxyCode, {
+      eip1967Impl: "0x0000000000000000000000001111111111111111111111111111111111111111",
+    });
+    const emptyImpl = analyzeBytecodeRisk("0x");
+
+    const merged = mergeProxyAndImplRisk(proxyAnalysis, emptyImpl);
+    expect(merged.risk_score).toBe(50); // 30 + 20
+    expect(merged.risk_level).toBe("HIGH");
+    expect(merged.implementation_analysis?.is_contract).toBe(false);
+    expect(merged.implementation_analysis?.bytecode_bytes).toBe(0);
+    expect(
+      merged.red_flags.some((f) => f.includes("[Implementation]") && f.includes("no deployed bytecode")),
+    ).toBe(true);
   });
 });

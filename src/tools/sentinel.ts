@@ -42,6 +42,16 @@ export interface BytecodeRiskExtra {
   eip1967Admin?: string | null;
 }
 
+export interface ImplementationAnalysis {
+  is_contract: boolean;
+  bytecode_bytes: number;
+  opcodes: OpcodeCounts;
+  detected_selectors: DetectedSelector[];
+  red_flags: string[];
+  risk_score: number;
+  risk_level: RiskLevel;
+}
+
 export interface BytecodeRiskAnalysis {
   is_contract: boolean;
   bytecode_bytes: number;
@@ -54,6 +64,7 @@ export interface BytecodeRiskAnalysis {
   risk_score: number;
   risk_level: RiskLevel;
   verdict: string;
+  implementation_analysis?: ImplementationAnalysis;
 }
 
 interface SelectorSpec {
@@ -173,6 +184,16 @@ function riskLevelFromScore(score: number): RiskLevel {
   if (score >= 50) return "HIGH";
   if (score >= 25) return "MEDIUM";
   return "LOW";
+}
+
+function verdictFromRiskLevel(level: RiskLevel): string {
+  const verdictByLevel: Record<RiskLevel, string> = {
+    LOW: "Low static bytecode risk: no high-severity opcodes or upgradeability risks detected.",
+    MEDIUM: "Moderate risk: proxy delegation, factory creation, or privileged controls detected — review before interacting.",
+    HIGH: "High risk: dangerous opcodes (e.g. SELFDESTRUCT / tx.origin / unverified DELEGATECALL) or upgradeable privileges detected.",
+    CRITICAL: "Critical risk: multiple severe bytecode/upgradeability red flags detected — treat with extreme caution.",
+  };
+  return verdictByLevel[level];
 }
 
 /**
@@ -361,13 +382,6 @@ export function analyzeBytecodeRisk(
   const clampedScore = Math.min(100, Math.max(0, score));
   const riskLevel = riskLevelFromScore(clampedScore);
 
-  const verdictByLevel: Record<RiskLevel, string> = {
-    LOW: "Low static bytecode risk: no high-severity opcodes or upgradeability risks detected.",
-    MEDIUM: "Moderate risk: proxy delegation, factory creation, or privileged controls detected — review before interacting.",
-    HIGH: "High risk: dangerous opcodes (e.g. SELFDESTRUCT / tx.origin / unverified DELEGATECALL) or upgradeable privileges detected.",
-    CRITICAL: "Critical risk: multiple severe bytecode/upgradeability red flags detected — treat with extreme caution.",
-  };
-
   return {
     is_contract: true,
     bytecode_bytes: bytes.length,
@@ -379,7 +393,118 @@ export function analyzeBytecodeRisk(
     red_flags: redFlags,
     risk_score: clampedScore,
     risk_level: riskLevel,
-    verdict: verdictByLevel[riskLevel],
+    verdict: verdictFromRiskLevel(riskLevel),
+  };
+}
+
+/**
+ * Pure, deterministic combiner that merges proxy shell bytecode analysis with
+ * the unwrapped implementation contract analysis (EIP-1967 / EIP-1167).
+ * Deduplicates detected selectors, attaches `implementation_analysis`, propagates
+ * implementation red flags, and recomputes clamped risk_score / risk_level / verdict.
+ */
+export function mergeProxyAndImplRisk(
+  proxyAnalysis: BytecodeRiskAnalysis,
+  implAnalysis: BytecodeRiskAnalysis,
+): BytecodeRiskAnalysis {
+  // Merge and deduplicate detected selectors by 4-byte selector hex.
+  const seenSelectors = new Set<string>();
+  const mergedSelectors: DetectedSelector[] = [];
+  for (const s of [...proxyAnalysis.detected_selectors, ...implAnalysis.detected_selectors]) {
+    const key = s.selector.toLowerCase();
+    if (!seenSelectors.has(key)) {
+      seenSelectors.add(key);
+      mergedSelectors.push(s);
+    }
+  }
+
+  const proxySelectorSet = new Set(
+    proxyAnalysis.detected_selectors.map((s) => s.selector.toLowerCase()),
+  );
+  const implSelectorSet = new Set(
+    implAnalysis.detected_selectors.map((s) => s.selector.toLowerCase()),
+  );
+
+  const mergedRedFlags = [...proxyAnalysis.red_flags];
+  let score = proxyAnalysis.risk_score;
+
+  if (!implAnalysis.is_contract) {
+    score += 20;
+    mergedRedFlags.push(
+      "[Implementation] Target implementation address has no deployed bytecode (EOA or self-destructed).",
+    );
+  } else {
+    // Propagate opcode risks discovered in the implementation contract.
+    if (implAnalysis.opcodes.selfdestruct > 0) {
+      score += 45;
+    }
+    if (implAnalysis.opcodes.origin > 0) {
+      score += 20;
+    }
+    if (implAnalysis.opcodes.delegatecall > 0) {
+      score += implAnalysis.proxy_type === "NONE" ? 25 : 15;
+    }
+    if (implAnalysis.opcodes.create2 > 0) {
+      score += 15;
+    }
+    if (implAnalysis.opcodes.create > 0) {
+      score += 5;
+    }
+
+    // Propagate privileged selector risks not already counted on the proxy shell.
+    const proxyHasUpgrade =
+      proxySelectorSet.has("0x3659cfe6") || proxySelectorSet.has("0x4f1ef286");
+    const implHasUpgrade =
+      implSelectorSet.has("0x3659cfe6") || implSelectorSet.has("0x4f1ef286");
+    if (implHasUpgrade && !proxyHasUpgrade) {
+      score += 15;
+    }
+
+    if (implSelectorSet.has("0x40c10f19") && !proxySelectorSet.has("0x40c10f19")) {
+      score += 10;
+    }
+
+    if (implSelectorSet.has("0x8456cb59") && !proxySelectorSet.has("0x8456cb59")) {
+      score += 10;
+    }
+
+    const proxyHasOwner =
+      proxySelectorSet.has("0x8da5cb5b") || proxySelectorSet.has("0xf2fde38b");
+    const implHasOwner =
+      implSelectorSet.has("0x8da5cb5b") || implSelectorSet.has("0xf2fde38b");
+    if (implHasOwner && !proxyHasOwner) {
+      score += 5;
+    }
+
+    for (const flag of implAnalysis.red_flags) {
+      const tagged = `[Implementation] ${flag}`;
+      if (!mergedRedFlags.includes(tagged)) {
+        mergedRedFlags.push(tagged);
+      }
+    }
+  }
+
+  const clampedScore = Math.min(100, Math.max(0, score));
+  const riskLevel = riskLevelFromScore(clampedScore);
+
+  const implementationAnalysis: ImplementationAnalysis = {
+    is_contract: implAnalysis.is_contract,
+    bytecode_bytes: implAnalysis.bytecode_bytes,
+    opcodes: { ...implAnalysis.opcodes },
+    detected_selectors: [...implAnalysis.detected_selectors],
+    red_flags: [...implAnalysis.red_flags],
+    risk_score: implAnalysis.risk_score,
+    risk_level: implAnalysis.risk_level,
+  };
+
+  return {
+    ...proxyAnalysis,
+    detected_selectors: mergedSelectors,
+    red_flags: mergedRedFlags,
+    risk_score: clampedScore,
+    risk_level: riskLevel,
+    verdict: verdictFromRiskLevel(riskLevel),
+    implementation_analysis: implementationAnalysis,
   };
 }
 
@@ -417,10 +542,21 @@ export async function sentinelCore(args: {
       }),
     ]);
 
-    const analysis = analyzeBytecodeRisk(bytecode ?? "0x", {
+    let analysis = analyzeBytecodeRisk(bytecode ?? "0x", {
       eip1967Impl: implSlot ?? null,
       eip1967Admin: adminSlot ?? null,
     });
+
+    if (
+      (analysis.proxy_type === "EIP-1967" || analysis.proxy_type === "EIP-1167") &&
+      analysis.proxy_implementation
+    ) {
+      const implBytecode = await client.getCode({
+        address: getAddress(analysis.proxy_implementation),
+      });
+      const implAnalysis = analyzeBytecodeRisk(implBytecode ?? "0x");
+      analysis = mergeProxyAndImplRisk(analysis, implAnalysis);
+    }
 
     return toolResult({
       address: normalizedAddress,
@@ -443,7 +579,7 @@ export const flareContractSentinel = withX402(
 export function registerSentinelTool(server: McpServer): void {
   server.tool(
     "flare_contract_sentinel",
-    "Static EVM bytecode & proxy risk analyzer for any address on Flare (mainnet, coston2, songbird, coston). Detects EOA vs contract, EIP-1167/EIP-1967 proxies, risky opcodes (SELFDESTRUCT, DELEGATECALL, CREATE2, CREATE, ORIGIN) with PUSH-safe disassembly, common function selectors (ERC-20, EIP-3009, Ownable, Pausable, UUPS, Mintable), and returns a 0-100 risk score with red flags.",
+    "Static EVM bytecode & proxy risk analyzer for any address on Flare (mainnet, coston2, songbird, coston). Detects EOA vs contract, automatically unwraps EIP-1167/EIP-1967 proxy implementations, scans risky opcodes (SELFDESTRUCT, DELEGATECALL, CREATE2, CREATE, ORIGIN) with PUSH-safe disassembly, detects common function selectors (ERC-20, EIP-3009, Ownable, Pausable, UUPS, Mintable), and returns a 0-100 risk score with red flags.",
     flareContractSentinelInput,
     flareContractSentinel,
   );

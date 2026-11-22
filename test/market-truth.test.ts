@@ -9,6 +9,8 @@ import {
   computeCertificateHash,
   marketTruthCore,
   marketTruthBundleInput,
+  verifyMarketTruthCore,
+  verifyMarketTruthInput,
   type VerifiedMarketFeed,
 } from "../src/tools/market-truth.js";
 
@@ -259,5 +261,93 @@ describe("marketTruthCore input guards & x402 schema", () => {
     const overRes = await marketTruthCore({ feeds: tooMany, network: "mainnet" });
     expect(overRes.isError).toBe(true);
     expect(overRes.content[0].text).toContain(String(MAX_MARKET_TRUTH_FEEDS));
+  });
+});
+
+describe("verifyMarketTruthCore (free offline companion tool)", () => {
+  it("exposes certificate input without x402_payment", () => {
+    expect(verifyMarketTruthInput).toHaveProperty("certificate");
+    expect(verifyMarketTruthInput).not.toHaveProperty("x402_payment");
+  });
+
+  it("verifies a valid certificate passed as an object", async () => {
+    const cert = buildMarketTruthCertificate({
+      network: "mainnet",
+      created_at: 1790000000,
+      claim_note: "Object input check",
+      feeds: sampleFeeds(),
+    });
+
+    const res = await verifyMarketTruthCore({ certificate: cert });
+    const parsed = JSON.parse(res.content[0].text) as Record<string, unknown>;
+    expect(parsed).toEqual({
+      valid: true,
+      schema_version: MARKET_TRUTH_SCHEMA_VERSION,
+      network: "mainnet",
+      feed_count: 3,
+      certificate_hash: cert.certificate_hash,
+    });
+  });
+
+  it("verifies a valid certificate passed as a JSON string", async () => {
+    const cert = buildMarketTruthCertificate({
+      network: "coston2",
+      created_at: 1790000005,
+      feeds: sampleFeeds().slice(0, 2),
+    });
+
+    const res = await verifyMarketTruthCore({ certificate: JSON.stringify(cert) });
+    const parsed = JSON.parse(res.content[0].text) as Record<string, unknown>;
+    expect(parsed).toEqual({
+      valid: true,
+      schema_version: MARKET_TRUTH_SCHEMA_VERSION,
+      network: "coston2",
+      feed_count: 2,
+      certificate_hash: cert.certificate_hash,
+    });
+  });
+
+  it("reports tampered certificates as invalid with reason", async () => {
+    const cert = buildMarketTruthCertificate({
+      network: "mainnet",
+      created_at: 1790000000,
+      claim_note: "Original",
+      feeds: sampleFeeds(),
+    });
+    const tampered = { ...cert, claim_note: "Tampered" };
+
+    const res = await verifyMarketTruthCore({ certificate: tampered });
+    const parsed = JSON.parse(res.content[0].text) as {
+      valid: boolean;
+      reason?: string;
+      schema_version: string | null;
+      network: string | null;
+      feed_count: number | null;
+      certificate_hash: string | null;
+    };
+    expect(parsed.valid).toBe(false);
+    expect(parsed.reason).toContain("certificate_hash mismatch");
+    expect(parsed.schema_version).toBe(MARKET_TRUTH_SCHEMA_VERSION);
+    expect(parsed.network).toBe("mainnet");
+    expect(parsed.feed_count).toBe(3);
+    expect(parsed.certificate_hash).toBe(cert.certificate_hash);
+  });
+
+  it("handles malformed JSON strings safely without throwing", async () => {
+    const res = await verifyMarketTruthCore({ certificate: "{broken-json" });
+    const parsed = JSON.parse(res.content[0].text) as {
+      valid: boolean;
+      reason?: string;
+      schema_version: string | null;
+      network: string | null;
+      feed_count: number | null;
+      certificate_hash: string | null;
+    };
+    expect(parsed.valid).toBe(false);
+    expect(parsed.reason).toContain("invalid JSON string");
+    expect(parsed.schema_version).toBeNull();
+    expect(parsed.network).toBeNull();
+    expect(parsed.feed_count).toBeNull();
+    expect(parsed.certificate_hash).toBeNull();
   });
 });
