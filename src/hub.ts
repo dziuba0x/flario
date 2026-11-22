@@ -15,7 +15,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { buildServer, SERVER_INFO } from "./server.js";
 import { loadX402Config } from "./x402/config.js";
 import {
-  buildRequirements,
+  buildRequirementsAsync,
   verifyPayment,
   settlePayment,
   type SettlementReceipt,
@@ -86,7 +86,7 @@ async function handlePaidRest(
   if (config) {
     const header = req.headers["x-payment"];
     const requirements = {
-      ...buildRequirements(config, toolName),
+      ...(await buildRequirementsAsync(config, toolName)),
       resource: resourceUrl,
     };
     if (!header || typeof header !== "string") {

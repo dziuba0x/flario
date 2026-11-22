@@ -163,6 +163,7 @@ export function priceInUnits(config: X402Config, toolName: string): bigint {
 export function buildRequirements(
   config: X402Config,
   toolName: string,
+  eip712Name?: string,
 ): PaymentRequirements {
   return {
     scheme: "exact",
@@ -175,10 +176,31 @@ export function buildRequirements(
     maxTimeoutSeconds: 300,
     extra: {
       chainId: CHAIN_IDS[config.network],
-      eip712: { version: config.eip712Version },
+      eip712: {
+        ...(eip712Name ? { name: eip712Name } : {}),
+        version: config.eip712Version,
+      },
       standard: "EIP-3009",
     },
   };
+}
+
+/**
+ * Async variant that embeds the cached EIP-712 token name in `extra.eip712.name`,
+ * saving every x402 client an extra `name()` RPC round-trip before signing.
+ * Falls back gracefully if the RPC is unreachable.
+ */
+export async function buildRequirementsAsync(
+  config: X402Config,
+  toolName: string,
+): Promise<PaymentRequirements> {
+  let name: string | undefined;
+  try {
+    name = await tokenName(config);
+  } catch {
+    // Offline or non-standard RPC: omit name so clients can resolve it themselves.
+  }
+  return buildRequirements(config, toolName, name);
 }
 
 export interface VerifyDeps {

@@ -75,5 +75,31 @@ describe("fassets_liquidation_scanner: risk math", () => {
     );
     expect(r.asset_price_at_liquidation).toBeNull();
     expect(r.price_rise_to_liquidation_pct).toBeNull();
+    expect(r.liability_usd).toBe(0);
+    expect(r.topup_to_safe_usd).toBe(0);
+    expect(r.liquidated_at_20pct_shock).toBe(false);
+  });
+
+  it("computes vault-defense top-up USD and +20% shock cascade flag", () => {
+    // 1000 FXRP minted at $3.00 = $3000 liability.
+    // Vault CR = 1.40 (above min 1.30 -> headroom 1.077 <= 1.20 -> liquidated at +20% shock).
+    // Safety vault CR = 1.60 -> deficit = $3000 * (1.60 - 1.40) = $600.
+    const r = computeLiquidationRisk(
+      fixture.vault,
+      agentSlice({
+        vaultCollateralRatioBIPS: 14_000n,
+        poolCollateralRatioBIPS: 99_000n,
+        mintedUBA: 1_000_000_000n, // 1000 FXRP (6 decimals)
+      }),
+      MIN_VAULT,
+      MIN_POOL,
+      XRP_PRICE,
+      6,
+      16_000n,
+      18_000n,
+    );
+    expect(r.liability_usd).toBeCloseTo(3000, 2);
+    expect(r.topup_to_safe_usd).toBeCloseTo(600, 2);
+    expect(r.liquidated_at_20pct_shock).toBe(true);
   });
 });

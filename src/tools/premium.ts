@@ -75,6 +75,12 @@ export interface LiquidationRisk {
   price_rise_to_liquidation_pct: number | null;
   binding_constraint: "vault" | "pool";
   minted: string;
+  /** Minted FAsset exposure valued in USD at live FTSOv2 price. */
+  liability_usd: number;
+  /** Exact USD collateral deficit to restore binding safety CR (0 if already safe). */
+  topup_to_safe_usd: number;
+  /** True if a +20% underlying price shock pushes the agent into liquidation. */
+  liquidated_at_20pct_shock: boolean;
 }
 
 const AGENT_STATUS = ["NORMAL", "CCB", "LIQUIDATION", "FULL_LIQUIDATION", "DESTROYING"] as const;
@@ -102,24 +108,38 @@ export function computeLiquidationRisk(
   minPoolCrBips: bigint,
   assetPriceUsd: number,
   assetDecimals: number,
+  safetyVaultCrBips: bigint = minVaultCrBips,
+  safetyPoolCrBips: bigint = minPoolCrBips,
 ): LiquidationRisk {
   const vaultCr = Number(info.vaultCollateralRatioBIPS) / 10_000;
   const poolCr = Number(info.poolCollateralRatioBIPS) / 10_000;
   const vaultMin = Number(minVaultCrBips) / 10_000;
   const poolMin = Number(minPoolCrBips) / 10_000;
+  const vaultSafety = Number(safetyVaultCrBips) / 10_000;
+  const poolSafety = Number(safetyPoolCrBips) / 10_000;
 
   const vaultHeadroom = vaultMin > 0 ? vaultCr / vaultMin : Infinity;
   const poolHeadroom = poolMin > 0 ? poolCr / poolMin : Infinity;
   const binding = vaultHeadroom <= poolHeadroom ? "vault" : "pool";
   const headroom = Math.min(vaultHeadroom, poolHeadroom);
 
+  const mintedAmount = Number(info.mintedUBA) / 10 ** assetDecimals;
+  const liabilityUsd = mintedAmount * assetPriceUsd;
+  const bindingCr = binding === "vault" ? vaultCr : poolCr;
+  const bindingSafetyCr = binding === "vault" ? vaultSafety : poolSafety;
+  const topupToSafeUsd =
+    info.mintedUBA > 0n && bindingSafetyCr > bindingCr
+      ? Number((liabilityUsd * (bindingSafetyCr - bindingCr)).toFixed(2))
+      : 0;
+
   const hasExposure = info.mintedUBA > 0n && Number.isFinite(headroom);
   const liquidationPrice = hasExposure ? assetPriceUsd * headroom : null;
+  const inLiquidation = info.status === 2 || info.status === 3;
 
   return {
     agent_vault: vault,
     status: AGENT_STATUS[info.status] ?? `UNKNOWN(${info.status})`,
-    in_liquidation: info.status === 2 || info.status === 3,
+    in_liquidation: inLiquidation,
     vault_collateral_ratio: vaultCr,
     vault_min_ratio: vaultMin,
     pool_collateral_ratio: poolCr,
@@ -129,7 +149,10 @@ export function computeLiquidationRisk(
     price_rise_to_liquidation_pct:
       liquidationPrice !== null ? (headroom - 1) * 100 : null,
     binding_constraint: binding,
-    minted: (Number(info.mintedUBA) / 10 ** assetDecimals).toString(),
+    minted: mintedAmount.toString(),
+    liability_usd: Number(liabilityUsd.toFixed(2)),
+    topup_to_safe_usd: topupToSafeUsd,
+    liquidated_at_20pct_shock: inLiquidation || (hasExposure && headroom <= 1.2),
   };
 }
 
@@ -163,7 +186,7 @@ export async function liquidationScannerCore(args: {
     const client = getClient(network);
     const abi = getInterfaceAbi("IAssetManager", network);
 
-    const [settings, collateralTypes, ftsoV2] = await Promise.all([
+    const [settings, collateralTypes, ftsoV2, [vaults]] = await Promise.all([
       client.readContract({ address: manager, abi, functionName: "getSettings" }) as Promise<{
         assetDecimals: bigint;
       }>,
@@ -171,6 +194,12 @@ export async function liquidationScannerCore(args: {
         readonly CollateralTypeStruct[]
       >,
       getContractAddress("FtsoV2", network),
+      client.readContract({
+        address: manager,
+        abi,
+        functionName: "getAllAgents",
+        args: [0n, BigInt(maxAgents)],
+      }) as Promise<readonly [readonly Address[], bigint]>,
     ]);
     const assetDecimals = Number(settings.assetDecimals);
 
@@ -188,8 +217,8 @@ export async function liquidationScannerCore(args: {
     })) as [bigint, number, bigint];
     const assetPriceUsd = Number(value) / 10 ** Number(decimals);
 
-    // Minimum CRs per collateral type: pool class (1) applies to all agents'
-    // pool collateral; vault minimums are matched per agent token below.
+    // Minimum & safety CRs per collateral type: pool class (1) applies to all
+    // agents' pool collateral; vault minimums are matched per agent token below.
     const poolType = collateralTypes.find((t) => Number(t.collateralClass) === 1);
     const vaultTypeByToken = new Map(
       collateralTypes
@@ -197,15 +226,8 @@ export async function liquidationScannerCore(args: {
         .map((t) => [t.token.toLowerCase(), t]),
     );
 
-    const [vaults] = (await client.readContract({
-      address: manager,
-      abi,
-      functionName: "getAllAgents",
-      args: [0n, BigInt(maxAgents)],
-    })) as readonly [readonly Address[], bigint];
-
     const risks: LiquidationRisk[] = [];
-    const batchSize = 5;
+    const batchSize = 10;
     for (let i = 0; i < vaults.length; i += batchSize) {
       const batch = vaults.slice(i, i + batchSize);
       const infos = (await Promise.all(
@@ -224,6 +246,8 @@ export async function liquidationScannerCore(args: {
             poolType?.minCollateralRatioBIPS ?? 0n,
             assetPriceUsd,
             assetDecimals,
+            vaultType?.safetyMinCollateralRatioBIPS ?? vaultType?.minCollateralRatioBIPS ?? 0n,
+            poolType?.safetyMinCollateralRatioBIPS ?? poolType?.minCollateralRatioBIPS ?? 0n,
           ),
         );
       }
@@ -234,6 +258,13 @@ export async function liquidationScannerCore(args: {
       const bh = b.cr_headroom < 0 ? Infinity : b.cr_headroom;
       return ah - bh;
     });
+
+    const totalLiabilityUsd = Number(
+      risks.reduce((sum, r) => sum + r.liability_usd, 0).toFixed(2),
+    );
+    const totalTopupToSafeUsd = Number(
+      risks.reduce((sum, r) => sum + r.topup_to_safe_usd, 0).toFixed(2),
+    );
 
     return toolResult({
       asset,
@@ -247,6 +278,9 @@ export async function liquidationScannerCore(args: {
       agents_within_10pct_of_liquidation: risks.filter(
         (r) => r.cr_headroom > 0 && r.cr_headroom < 1.1,
       ).length,
+      agents_liquidated_at_20pct_shock: risks.filter((r) => r.liquidated_at_20pct_shock).length,
+      total_liability_usd: totalLiabilityUsd,
+      total_topup_to_safe_usd: totalTopupToSafeUsd,
       model_note:
         "Liquidation price assumes collateral USD value constant while the underlying price moves (exact for stablecoin vault collateral, approximate for the FLR/SGB pool). CCB and safety ratios not modeled.",
       agents: risks,

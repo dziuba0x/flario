@@ -13,7 +13,7 @@
 import { z } from "zod";
 import { loadX402Config } from "./config.js";
 import {
-  buildRequirements,
+  buildRequirementsAsync,
   verifyPayment,
   settlePayment,
   type PaymentPayload,
@@ -93,7 +93,7 @@ export function withX402<T>(
       return textResult({
         x402_payment_required: true,
         x402Version: 1,
-        accepts: [buildRequirements(config, toolName)],
+        accepts: [await buildRequirementsAsync(config, toolName)],
         how_to_pay:
           "Sign an EIP-712 TransferWithAuthorization (EIP-3009) for the token/payee/amount in `accepts[0]` with a random bytes32 nonce and a ~5 min validity window. Base64-encode the JSON payload {from,to,value,validAfter,validBefore,nonce,v,r,s} and retry this call with it as `x402_payment`.",
       });
@@ -115,7 +115,7 @@ export function withX402<T>(
       return textResult(
         {
           x402_error: `payment verification failed: ${err instanceof Error ? err.message : String(err)}`,
-          accepts: [buildRequirements(config, toolName)],
+          accepts: [await buildRequirementsAsync(config, toolName)],
         },
         true,
       );

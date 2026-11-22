@@ -15,6 +15,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { privateKeyToAccount } from "viem/accounts";
 import { toHex } from "viem";
 import { EIP3009_TYPES } from "../src/x402/facilitator.js";
+import { verifyReceiptHash, type Receipt } from "../src/x402/receipt.js";
 
 const PAID_TOOL = "fassets_liquidation_scanner";
 const TOOL_ARGS = { asset: "FXRP", network: "coston2" };
@@ -58,7 +59,7 @@ const firstBody = JSON.parse((first.content as Array<{ text: string }>)[0].text)
     payTo: `0x${string}`;
     maxAmountRequired: string;
     network: string;
-    extra: { chainId: number; eip712: { version: string } };
+    extra: { chainId: number; eip712: { name?: string; version: string } };
   }>;
 };
 if (!firstBody.x402_payment_required || !firstBody.accepts?.[0]) {
@@ -70,14 +71,17 @@ const req = firstBody.accepts[0];
 process.stdout.write(`server: 402 — ${req.maxAmountRequired} units of ${req.asset} to ${req.payTo}\n\n`);
 
 // 2. Sign the EIP-3009 authorization off-chain (gasless for the payer).
-//    The EIP-712 domain name must match the token contract's name().
-const tokenNameAbi = [{ name: "name", type: "function", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] }] as const;
-const { getClient } = await import("../src/utils/rpc.js");
-const tokenName = (await getClient(req.network as never).readContract({
-  address: req.asset,
-  abi: tokenNameAbi,
-  functionName: "name",
-})) as string;
+//    Use extra.eip712.name from the 402 response to avoid an extra RPC call.
+let tokenName = req.extra.eip712.name;
+if (!tokenName) {
+  const tokenNameAbi = [{ name: "name", type: "function", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] }] as const;
+  const { getClient } = await import("../src/utils/rpc.js");
+  tokenName = (await getClient(req.network as never).readContract({
+    address: req.asset,
+    abi: tokenNameAbi,
+    functionName: "name",
+  })) as string;
+}
 
 const now = Math.floor(Date.now() / 1000);
 const message = {
@@ -125,6 +129,7 @@ const secondText = (second.content as Array<{ text: string }>)[0].text;
 const secondBody = JSON.parse(secondText) as {
   x402_error?: string;
   x402_payment_receipt?: { tx_hash: string; block_number: string };
+  x402_receipt?: Receipt;
   agents_scanned?: number;
 };
 if (secondBody.x402_error) {
@@ -132,7 +137,11 @@ if (secondBody.x402_error) {
   process.exit(1);
 }
 process.stdout.write("=== PAID RESULT ===\n");
-process.stdout.write(secondText.slice(0, 600) + "\n...\n\n");
+process.stdout.write(secondText.slice(0, 700) + "\n...\n\n");
 process.stdout.write(`settlement tx: ${secondBody.x402_payment_receipt?.tx_hash}\n`);
 process.stdout.write(`explorer:      https://coston2-explorer.flare.network/tx/${secondBody.x402_payment_receipt?.tx_hash}\n`);
+if (secondBody.x402_receipt) {
+  const hashOk = verifyReceiptHash(secondBody.x402_receipt);
+  process.stdout.write(`receipt:       ${secondBody.x402_receipt.schema_version} hash_verified=${hashOk}\n`);
+}
 await client.close();

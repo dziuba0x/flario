@@ -69,6 +69,7 @@ describe("buildReceipt schema", () => {
   const r = buildReceipt(baseParams);
 
   it("carries the full ZK-ready schema and never a plaintext payer", () => {
+    expect(r.schema_version).toBe("flario-receipt/2");
     expect(r.schema_version).toBe(RECEIPT_SCHEMA_VERSION);
     expect(r.commitment_scheme).toBe(COMMITMENT_SCHEME);
     expect(r).not.toHaveProperty("payer");
