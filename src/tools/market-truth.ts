@@ -17,8 +17,11 @@ import {
   fetchLatestFinalizedAnchor,
   verifyAnchorFeed,
   anchorFeedPrice,
+  anchorFeedLeaf,
+  type AnchorFeedBody,
   type AnchorFeedWithProof,
 } from "../utils/ftso-da.js";
+import { foldMerkleProof } from "../utils/fdc.js";
 import { withX402, x402PaymentInput } from "../x402/paywall.js";
 
 export const MARKET_TRUTH_SCHEMA_VERSION = "flario-market-truth/1" as const;
@@ -31,14 +34,17 @@ const VALID_NETWORKS: ReadonlySet<string> = new Set<NetworkType>([
   "coston",
 ]);
 const BYTES32_HEX_RE = /^0x[0-9a-fA-F]{64}$/;
+const BYTES21_HEX_RE = /^0x[0-9a-fA-F]{42}$/;
+const ZERO_BYTES32 =
+  "0x0000000000000000000000000000000000000000000000000000000000000000";
 
 export interface VerifiedMarketFeed {
   name: string;
-  feed_id?: Hex;
+  feed_id: Hex;
   price: number;
-  value?: number;
-  decimals?: number;
-  turnout_bips?: number;
+  raw_value: number;
+  decimals: number;
+  turnout_bips: number;
   voting_round_id: number;
   merkle_root: Hex;
   proof: Hex[];
@@ -197,23 +203,67 @@ export function verifyMarketTruthCertificate(
     if (typeof f.name !== "string" || f.name.length === 0) {
       return { valid: false, reason: `feeds[${i}].name must be a non-empty string` };
     }
+    if (typeof f.feed_id !== "string" || !BYTES21_HEX_RE.test(f.feed_id)) {
+      return {
+        valid: false,
+        reason: `feeds[${i}].feed_id must be a 21-byte hex string`,
+      };
+    }
     if (typeof f.price !== "number" || !Number.isFinite(f.price)) {
       return { valid: false, reason: `feeds[${i}].price must be a finite number` };
     }
     if (
-      typeof f.voting_round_id !== "number" ||
-      !Number.isInteger(f.voting_round_id) ||
-      f.voting_round_id < 0
+      typeof f.raw_value !== "number" ||
+      !Number.isInteger(f.raw_value) ||
+      f.raw_value < -2147483648 ||
+      f.raw_value > 2147483647
     ) {
       return {
         valid: false,
-        reason: `feeds[${i}].voting_round_id must be a non-negative integer`,
+        reason: `feeds[${i}].raw_value must be a 32-bit signed integer`,
       };
     }
-    if (typeof f.merkle_root !== "string" || !BYTES32_HEX_RE.test(f.merkle_root)) {
+    if (
+      typeof f.decimals !== "number" ||
+      !Number.isInteger(f.decimals) ||
+      f.decimals < -128 ||
+      f.decimals > 127
+    ) {
       return {
         valid: false,
-        reason: `feeds[${i}].merkle_root must be a 32-byte hex string`,
+        reason: `feeds[${i}].decimals must be an 8-bit signed integer`,
+      };
+    }
+    if (
+      typeof f.turnout_bips !== "number" ||
+      !Number.isInteger(f.turnout_bips) ||
+      f.turnout_bips < 0 ||
+      f.turnout_bips > 65535
+    ) {
+      return {
+        valid: false,
+        reason: `feeds[${i}].turnout_bips must be a 16-bit unsigned integer`,
+      };
+    }
+    if (
+      typeof f.voting_round_id !== "number" ||
+      !Number.isInteger(f.voting_round_id) ||
+      f.voting_round_id < 0 ||
+      f.voting_round_id > 4294967295
+    ) {
+      return {
+        valid: false,
+        reason: `feeds[${i}].voting_round_id must be a non-negative 32-bit integer`,
+      };
+    }
+    if (
+      typeof f.merkle_root !== "string" ||
+      !BYTES32_HEX_RE.test(f.merkle_root) ||
+      f.merkle_root.toLowerCase() === ZERO_BYTES32
+    ) {
+      return {
+        valid: false,
+        reason: `feeds[${i}].merkle_root must be a non-zero 32-byte hex string`,
       };
     }
     if (
@@ -268,6 +318,36 @@ export function verifyMarketTruthCertificate(
       valid: false,
       reason: "certificate_hash mismatch: certificate content has been altered",
     };
+  }
+
+  // Cryptographic verification of every feed's Merkle leaf + price consistency.
+  for (let i = 0; i < c.feeds.length; i++) {
+    const f = c.feeds[i] as unknown as VerifiedMarketFeed;
+    const feedBody: AnchorFeedBody = {
+      votingRoundId: f.voting_round_id,
+      id: f.feed_id,
+      value: f.raw_value,
+      turnoutBIPS: f.turnout_bips,
+      decimals: f.decimals,
+    };
+
+    const expectedPrice = anchorFeedPrice(feedBody);
+    const tolerance = Math.max(1e-12, Math.abs(expectedPrice) * 1e-9);
+    if (Math.abs(f.price - expectedPrice) > tolerance) {
+      return {
+        valid: false,
+        reason: `feeds[${i}].price (${f.price}) does not match raw_value/10^decimals (${expectedPrice})`,
+      };
+    }
+
+    const leaf = anchorFeedLeaf(feedBody);
+    const computedRoot = foldMerkleProof(leaf, f.proof);
+    if (computedRoot.toLowerCase() !== f.merkle_root.toLowerCase()) {
+      return {
+        valid: false,
+        reason: `feeds[${i}]: Merkle proof does not fold to merkle_root (computed ${computedRoot}, expected ${f.merkle_root})`,
+      };
+    }
   }
 
   return { valid: true };
@@ -370,7 +450,7 @@ export async function marketTruthCore(args: {
             name,
             feed_id: anchor.body.id,
             price: anchorFeedPrice(anchor.body),
-            value: anchor.body.value,
+            raw_value: anchor.body.value,
             decimals: anchor.body.decimals,
             turnout_bips: anchor.body.turnoutBIPS,
             voting_round_id: anchor.body.votingRoundId,

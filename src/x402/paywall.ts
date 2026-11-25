@@ -18,7 +18,7 @@ import {
   settlePayment,
   type PaymentPayload,
 } from "./facilitator.js";
-import { checkMandate } from "./mandate.js";
+import { checkMandate, releasePendingSpend } from "./mandate.js";
 import { finaliseSettlement } from "./emit.js";
 
 type ToolResult = {
@@ -134,6 +134,7 @@ export function withX402<T>(
     try {
       receipt = await settlePayment(config, payload);
     } catch (err) {
+      releasePendingSpend(config.network, payload);
       return textResult(
         { x402_error: `payment settlement failed: ${err instanceof Error ? err.message : String(err)}` },
         true,

@@ -1,12 +1,16 @@
 // Tests for FDC-verified settlement. The security core is bindTransfer:
 // an attestation that "tx X is confirmed" must not verify a payment unless
 // tx X actually contains the claimed ERC-20 Transfer.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   bindTransfer,
+  bindSettlementTxHash,
+  fdcVerifySettlement,
   ERC20_TRANSFER_TOPIC,
   type TransferCriteria,
 } from "../src/tools/fdc-settlement.js";
+import * as fdcV2 from "../src/tools/fdc-v2.js";
+import { encodeAttestationName, sourceIdName } from "../src/utils/fdc.js";
 import { buildReceipt, attachFdcRef, verifyReceiptHash } from "../src/x402/receipt.js";
 
 const ASSET = "0x3c71Fb2b7da7CE85dd1aF0A54174668e41BcD176";
@@ -130,5 +134,132 @@ describe("attachFdcRef (receipt upgrade to FDC-verified)", () => {
     // payer_commitment and every other field preserved
     expect(upgraded.payer_commitment).toBe(receipt.payer_commitment);
     expect(upgraded.amount).toBe(receipt.amount);
+  });
+});
+
+describe("bindSettlementTxHash & fdcVerifySettlement stage 2 (Red-Team CRITICAL #2)", () => {
+  const TX_A =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const TX_B =
+    "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("matches identical transactionHash case-insensitively", () => {
+    expect(
+      bindSettlementTxHash({ transactionHash: TX_A.toUpperCase().replace("0X", "0x") }, TX_A)
+        .matched,
+    ).toBe(true);
+  });
+
+  it("rejects mismatched or missing transactionHash", () => {
+    const mismatch = bindSettlementTxHash({ transactionHash: TX_A }, TX_B);
+    expect(mismatch.matched).toBe(false);
+    expect(mismatch.reason).toContain("does not match expected settlement_tx_hash");
+
+    const missing = bindSettlementTxHash({}, TX_B);
+    expect(missing.matched).toBe(false);
+    expect(missing.reason).toContain("missing a valid 32-byte transactionHash");
+  });
+
+  it("rejects replaying a valid proof for TX_A when verifying settlement_tx_hash=TX_B", async () => {
+    vi.spyOn(fdcV2, "retrieveAndVerifyProof").mockResolvedValue({
+      verified: true,
+      verification: "mocked",
+      network: "coston2",
+      voting_round_id: 1398000,
+      attestation_type: "EVMTransaction",
+      merkle_root: ("0x" + "12".repeat(32)) as `0x${string}`,
+      merkle_proof: [],
+      relay_address: "0x0000000000000000000000000000000000000001",
+      response: {
+        attestationType: encodeAttestationName("EVMTransaction"),
+        sourceId: encodeAttestationName(sourceIdName("flr", "coston2")),
+        votingRound: "1398000",
+        lowestUsedTimestamp: "1784300000",
+        requestBody: {
+          transactionHash: TX_A,
+          requiredConfirmations: "1",
+          provideInput: false,
+          listEvents: true,
+          logIndices: [],
+        },
+        responseBody: {
+          status: 1,
+          events: [transferEvent(ASSET, PAYER, PAYEE, 1000n)],
+        },
+      },
+    });
+
+    // Replay attack: proof is for TX_A, caller asks to verify TX_B
+    const replayRes = await fdcVerifySettlement({
+      settlement_tx_hash: TX_B,
+      network: "coston2",
+      asset: ASSET,
+      payee: PAYEE,
+      amount: "1000",
+      voting_round_id: 1398000,
+      abi_encoded_request: "0xabcd",
+    });
+    expect(replayRes.isError).toBe(true);
+    expect(replayRes.content[0].text).toContain("does not match expected settlement_tx_hash");
+
+    // Legitimate call: proof is for TX_A, caller asks to verify TX_A
+    const legitRes = await fdcVerifySettlement({
+      settlement_tx_hash: TX_A,
+      network: "coston2",
+      asset: ASSET,
+      payee: PAYEE,
+      amount: "1000",
+      voting_round_id: 1398000,
+      abi_encoded_request: "0xabcd",
+    });
+    expect(legitRes.isError).toBeUndefined();
+    const body = JSON.parse(legitRes.content[0].text) as { settlement_verified: boolean };
+    expect(body.settlement_verified).toBe(true);
+  });
+
+  it("rejects a proof whose sourceId does not match the claimed Flare network", async () => {
+    vi.spyOn(fdcV2, "retrieveAndVerifyProof").mockResolvedValue({
+      verified: true,
+      verification: "mocked",
+      network: "mainnet",
+      voting_round_id: 1398000,
+      attestation_type: "EVMTransaction",
+      merkle_root: ("0x" + "12".repeat(32)) as `0x${string}`,
+      merkle_proof: [],
+      relay_address: "0x0000000000000000000000000000000000000001",
+      response: {
+        attestationType: encodeAttestationName("EVMTransaction"),
+        sourceId: encodeAttestationName(sourceIdName("flr", "coston2")), // testnet proof replayed on mainnet
+        votingRound: "1398000",
+        lowestUsedTimestamp: "1784300000",
+        requestBody: {
+          transactionHash: TX_A,
+          requiredConfirmations: "1",
+          provideInput: false,
+          listEvents: true,
+          logIndices: [],
+        },
+        responseBody: {
+          status: 1,
+          events: [transferEvent(ASSET, PAYER, PAYEE, 1000n)],
+        },
+      },
+    });
+
+    const res = await fdcVerifySettlement({
+      settlement_tx_hash: TX_A,
+      network: "mainnet",
+      asset: ASSET,
+      payee: PAYEE,
+      amount: "1000",
+      voting_round_id: 1398000,
+      abi_encoded_request: "0xabcd",
+    });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toContain("sourceId");
   });
 });

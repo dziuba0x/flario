@@ -21,6 +21,8 @@ import { keccak256, toBytes, getAddress, type Hex } from "viem";
 import type { NetworkType } from "../utils/rpc.js";
 import {
   prepareAttestationRequest,
+  encodeAttestationName,
+  sourceIdName,
   type SourceChain,
 } from "../utils/fdc.js";
 import { retrieveAndVerifyProof } from "./fdc-v2.js";
@@ -152,6 +154,38 @@ export function bindTransfer(
   };
 }
 
+export interface TxHashBindingResult {
+  matched: boolean;
+  attested_tx_hash?: string;
+  reason?: string;
+}
+
+/**
+ * Bind the attested EVMTransaction requestBody.transactionHash strictly to the
+ * expected settlement_tx_hash so an attacker cannot replay an attestation from
+ * an unrelated (or older) transaction.
+ */
+export function bindSettlementTxHash(
+  requestBody: { transactionHash?: unknown } | undefined,
+  expectedTxHash: string,
+): TxHashBindingResult {
+  const attested = requestBody?.transactionHash;
+  if (typeof attested !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(attested)) {
+    return {
+      matched: false,
+      reason: "attested requestBody is missing a valid 32-byte transactionHash",
+    };
+  }
+  if (attested.toLowerCase() !== expectedTxHash.toLowerCase()) {
+    return {
+      matched: false,
+      attested_tx_hash: attested,
+      reason: `attested transactionHash (${attested}) does not match expected settlement_tx_hash (${expectedTxHash})`,
+    };
+  }
+  return { matched: true, attested_tx_hash: attested };
+}
+
 export const fdcVerifySettlementInput = {
   settlement_tx_hash: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
   network: z.enum(["mainnet", "coston2", "songbird", "coston"]),
@@ -197,6 +231,29 @@ export async function fdcVerifySettlement(args: {
           `Attestation is ${proof.attestation_type}, expected EVMTransaction over the settlement tx.`,
         );
       }
+
+      const reqBody = proof.response.requestBody as
+        | { transactionHash?: unknown; requiredConfirmations?: number | string }
+        | undefined;
+      const txBinding = bindSettlementTxHash(reqBody, settlement_tx_hash);
+      if (!txBinding.matched) {
+        return toolError(
+          `FDC attestation is VALID (Merkle-verified against the Relay root), but it is NOT for the claimed settlement transaction: ${txBinding.reason}. Do not treat this settlement as verified.`,
+        );
+      }
+
+      const expectedSourceId = encodeAttestationName(
+        sourceIdName(EVM_SOURCE[network], network),
+      );
+      if (
+        typeof proof.response.sourceId === "string" &&
+        proof.response.sourceId.toLowerCase() !== expectedSourceId.toLowerCase()
+      ) {
+        return toolError(
+          `FDC attestation sourceId (${proof.response.sourceId}) does not match expected ${sourceIdName(EVM_SOURCE[network], network)} (${expectedSourceId}) for ${network}.`,
+        );
+      }
+
       const body = proof.response.responseBody as {
         events?: EvmEvent[];
         status?: number | string;

@@ -147,13 +147,29 @@ async function tokenName(config: X402Config): Promise<string> {
   return name;
 }
 
-// Nonces settled by this process. On-chain authorizationState is the durable
-// replay barrier once a settlement lands; this set closes the window between
-// broadcasting a settlement and its state becoming visible.
+// Nonces settled or currently in flight in this process. On-chain
+// authorizationState is the durable replay barrier once a settlement lands;
+// inFlightNonces closes the synchronous TOCTOU window before the first await.
 const settledNonces = new Set<string>();
+const inFlightNonces = new Set<string>();
 
 function nonceKey(payload: PaymentPayload): string {
   return `${payload.from.toLowerCase()}:${payload.nonce.toLowerCase()}`;
+}
+
+/** Synchronously reserve a nonce before any async settlement work. */
+export function reserveNonce(payload: PaymentPayload): boolean {
+  const key = nonceKey(payload);
+  if (settledNonces.has(key) || inFlightNonces.has(key)) {
+    return false;
+  }
+  inFlightNonces.add(key);
+  return true;
+}
+
+/** Release an in-flight nonce reservation if settlement fails before landing. */
+export function releaseNonce(payload: PaymentPayload): void {
+  inFlightNonces.delete(nonceKey(payload));
 }
 
 export function priceInUnits(config: X402Config, toolName: string): bigint {
@@ -250,13 +266,16 @@ export async function verifyPayment(
   if (now >= Number(payload.validBefore)) {
     throw new Error("authorization has expired (validBefore in the past)");
   }
-  if (settledNonces.has(nonceKey(payload))) {
+  const key = nonceKey(payload);
+  if (settledNonces.has(key)) {
     throw new Error("this payment authorization was already settled by this server (replay)");
   }
-  if (await deps.nonceUsedOnChain(payload.from, payload.nonce)) {
-    throw new Error("this payment authorization nonce was already used on-chain (replay)");
+  if (inFlightNonces.has(key)) {
+    throw new Error("this payment authorization is already being settled by this server (replay)");
   }
 
+  // Verify EIP-712 signature locally BEFORE any on-chain nonce RPC lookup so
+  // unsigned or forged payloads cannot amplify RPC calls.
   const domain = {
     name: await deps.tokenName(),
     version: config.eip712Version,
@@ -281,6 +300,10 @@ export async function verifyPayment(
   if (!valid) {
     throw new Error("EIP-712 signature does not match the payer address");
   }
+
+  if (await deps.nonceUsedOnChain(payload.from, payload.nonce)) {
+    throw new Error("this payment authorization nonce was already used on-chain (replay)");
+  }
 }
 
 export interface SettlementReceipt {
@@ -293,74 +316,148 @@ export interface SettlementReceipt {
   network: NetworkType;
 }
 
+export interface SettleDeps {
+  simulateVrs: (
+    args: readonly [`0x${string}`, `0x${string}`, bigint, bigint, bigint, Hex, number, Hex, Hex],
+  ) => Promise<unknown>;
+  simulatePacked: (
+    args: readonly [`0x${string}`, `0x${string}`, bigint, bigint, bigint, Hex, Hex],
+  ) => Promise<unknown>;
+  writeContract: (request: unknown) => Promise<Hex>;
+  waitForReceipt: (
+    hash: Hex,
+  ) => Promise<{ status: string; blockNumber: bigint; transactionHash: Hex }>;
+}
+
 /**
  * Broadcast the client-signed transferWithAuthorization. Tries the canonical
  * (v,r,s) variant first, then the packed-signature variant used by USD₮0.
+ *
+ * The packed-signature fallback runs ONLY when simulation fails — never after
+ * writeContract has already broadcast a transaction.
  */
 export async function settlePayment(
   config: X402Config,
   payload: PaymentPayload,
+  deps?: SettleDeps,
 ): Promise<SettlementReceipt> {
-  const signer = getSigner(config.network);
-  if (!signer) {
-    throw new Error(
-      "x402 settlement needs FLARE_PRIVATE_KEY (operator gas key) — the client-signed authorization is broadcast by this server and gas is paid by the operator",
-    );
+  // Synchronously reserve the nonce before the first await to close the TOCTOU window.
+  if (!reserveNonce(payload)) {
+    throw new Error("this payment authorization was already settled or is already in flight (replay)");
   }
-  const client = getClient(config.network);
-  const base = {
-    from: getAddress(payload.from),
-    to: getAddress(payload.to),
-    value: BigInt(payload.value),
-    validAfter: BigInt(payload.validAfter),
-    validBefore: BigInt(payload.validBefore),
-    nonce: payload.nonce,
-  };
 
-  let txHash: Hex;
   try {
-    const { request } = await client.simulateContract({
-      address: config.tokenAddress,
-      abi: TOKEN_ABI,
-      functionName: "transferWithAuthorization",
-      args: [base.from, base.to, base.value, base.validAfter, base.validBefore, base.nonce, payload.v, payload.r, payload.s],
-      account: signer.account,
-    });
-    txHash = await signer.wallet.writeContract(request);
-  } catch {
-    const signature = (payload.r +
-      payload.s.slice(2) +
-      payload.v.toString(16).padStart(2, "0")) as Hex;
-    const { request } = await client.simulateContract({
-      address: config.tokenAddress,
-      abi: TOKEN_ABI_BYTES_SIG,
-      functionName: "transferWithAuthorization",
-      args: [base.from, base.to, base.value, base.validAfter, base.validBefore, base.nonce, signature],
-      account: signer.account,
-    });
-    txHash = await signer.wallet.writeContract(request);
-  }
+    let settleOps: SettleDeps;
+    if (deps) {
+      settleOps = deps;
+    } else {
+      const signer = getSigner(config.network);
+      if (!signer) {
+        throw new Error(
+          "x402 settlement needs FLARE_PRIVATE_KEY (operator gas key) — the client-signed authorization is broadcast by this server and gas is paid by the operator",
+        );
+      }
+      const client = getClient(config.network);
+      settleOps = {
+        simulateVrs: async (args) => {
+          const { request } = await client.simulateContract({
+            address: config.tokenAddress,
+            abi: TOKEN_ABI,
+            functionName: "transferWithAuthorization",
+            args,
+            account: signer.account,
+          });
+          return request;
+        },
+        simulatePacked: async (args) => {
+          const { request } = await client.simulateContract({
+            address: config.tokenAddress,
+            abi: TOKEN_ABI_BYTES_SIG,
+            functionName: "transferWithAuthorization",
+            args,
+            account: signer.account,
+          });
+          return request;
+        },
+        writeContract: (request) =>
+          signer.wallet.writeContract(request as Parameters<typeof signer.wallet.writeContract>[0]),
+        waitForReceipt: (hash) => client.waitForTransactionReceipt({ hash }),
+      };
+    }
 
-  const receipt = await client.waitForTransactionReceipt({ hash: txHash });
-  if (receipt.status !== "success") {
-    throw new Error(`settlement transaction ${txHash} reverted`);
-  }
-  settledNonces.add(nonceKey(payload));
+    const base = {
+      from: getAddress(payload.from),
+      to: getAddress(payload.to),
+      value: BigInt(payload.value),
+      validAfter: BigInt(payload.validAfter),
+      validBefore: BigInt(payload.validBefore),
+      nonce: payload.nonce,
+    };
 
-  return {
-    tx_hash: txHash,
-    block_number: receipt.blockNumber.toString(),
-    payer: base.from,
-    payee: base.to,
-    amount_units: payload.value,
-    token: config.tokenAddress,
-    network: config.network,
-  };
+    // Simulate first; only fall back to packed signature on simulation failure.
+    let request: unknown;
+    try {
+      request = await settleOps.simulateVrs([
+        base.from,
+        base.to,
+        base.value,
+        base.validAfter,
+        base.validBefore,
+        base.nonce,
+        payload.v,
+        payload.r,
+        payload.s,
+      ]);
+    } catch {
+      const signature = (payload.r +
+        payload.s.slice(2) +
+        payload.v.toString(16).padStart(2, "0")) as Hex;
+      request = await settleOps.simulatePacked([
+        base.from,
+        base.to,
+        base.value,
+        base.validAfter,
+        base.validBefore,
+        base.nonce,
+        signature,
+      ]);
+    }
+
+    // Broadcast once — never fall back after writeContract has been called.
+    const txHash = await settleOps.writeContract(request);
+
+    const receipt = await settleOps.waitForReceipt(txHash);
+    if (receipt.transactionHash.toLowerCase() !== txHash.toLowerCase()) {
+      throw new Error(
+        `settlement transaction ${txHash} was replaced by ${receipt.transactionHash}; refusing mismatched receipt`,
+      );
+    }
+    if (receipt.status !== "success") {
+      throw new Error(`settlement transaction ${txHash} reverted`);
+    }
+
+    settledNonces.add(nonceKey(payload));
+    inFlightNonces.delete(nonceKey(payload));
+
+    return {
+      tx_hash: txHash,
+      block_number: receipt.blockNumber.toString(),
+      payer: base.from,
+      payee: base.to,
+      amount_units: payload.value,
+      token: config.tokenAddress,
+      network: config.network,
+    };
+  } catch (err) {
+    releaseNonce(payload);
+    throw err;
+  }
 }
 
 /** Test-only: reset the in-process replay cache. */
 export function resetSettledNonces(): void {
   settledNonces.clear();
+  inFlightNonces.clear();
 }
 
 /** Test-only: mark a payload settled without broadcasting. */

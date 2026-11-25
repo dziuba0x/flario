@@ -18,6 +18,13 @@ export const EIP1967_ADMIN_SLOT =
 /** Standard EIP-1167 minimal proxy runtime bytecode prefix (10 bytes). */
 const EIP1167_PREFIX = "363d3d373d3d3d363d73";
 
+/**
+ * Exact 45-byte (90 hex chars without 0x) canonical EIP-1167 minimal proxy
+ * runtime bytecode pattern.
+ */
+const EIP1167_CANONICAL_RE =
+  /^363d3d373d3d3d363d73([0-9a-f]{40})5af43d82803e903d91602b57fd5bf3$/i;
+
 const ZERO_ADDRESS_HEX = "0".repeat(40);
 
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
@@ -26,6 +33,7 @@ export type ProxyType = "NONE" | "EIP-1167" | "EIP-1967";
 export interface OpcodeCounts {
   selfdestruct: number;
   delegatecall: number;
+  callcode: number;
   create2: number;
   create: number;
   origin: number;
@@ -190,7 +198,7 @@ function verdictFromRiskLevel(level: RiskLevel): string {
   const verdictByLevel: Record<RiskLevel, string> = {
     LOW: "Low static bytecode risk: no high-severity opcodes or upgradeability risks detected.",
     MEDIUM: "Moderate risk: proxy delegation, factory creation, or privileged controls detected — review before interacting.",
-    HIGH: "High risk: dangerous opcodes (e.g. SELFDESTRUCT / tx.origin / unverified DELEGATECALL) or upgradeable privileges detected.",
+    HIGH: "High risk: dangerous opcodes (e.g. SELFDESTRUCT / tx.origin / unverified DELEGATECALL / CALLCODE) or upgradeable privileges detected.",
     CRITICAL: "Critical risk: multiple severe bytecode/upgradeability red flags detected — treat with extreme caution.",
   };
   return verdictByLevel[level];
@@ -209,6 +217,7 @@ export function analyzeBytecodeRisk(
   const emptyOpcodes: OpcodeCounts = {
     selfdestruct: 0,
     delegatecall: 0,
+    callcode: 0,
     create2: 0,
     create: 0,
     origin: 0,
@@ -248,6 +257,9 @@ export function analyzeBytecodeRisk(
       case 0xf4:
         opcodes.delegatecall += 1;
         break;
+      case 0xf2:
+        opcodes.callcode += 1;
+        break;
       case 0xf5:
         opcodes.create2 += 1;
         break;
@@ -263,22 +275,31 @@ export function analyzeBytecodeRisk(
     i += 1;
   }
 
-  // Proxy detection: EIP-1167 minimal proxy in bytecode, or EIP-1967 storage slots.
+  // Proxy detection: exact 45-byte canonical EIP-1167 minimal proxy in bytecode,
+  // or EIP-1967 storage slot backed by DELEGATECALL / CALLCODE in shell bytecode.
   const eip1967Impl = extractNonZeroAddress(extra?.eip1967Impl);
   const eip1967Admin = extractNonZeroAddress(extra?.eip1967Admin);
 
   let proxyType: ProxyType = "NONE";
   let proxyImplementation: string | null = null;
-  let proxyAdmin: string | null = eip1967Admin;
+  let proxyAdmin: string | null = null;
 
-  if (hex.startsWith(EIP1167_PREFIX) && hex.length >= EIP1167_PREFIX.length + 40) {
+  const eip1167Match = EIP1167_CANONICAL_RE.exec(hex);
+  const isEip1167Decoy = !eip1167Match && hex.startsWith(EIP1167_PREFIX);
+  const hasDelegationOpcode = opcodes.delegatecall > 0 || opcodes.callcode > 0;
+  let isEip1967Decoy = false;
+
+  if (eip1167Match) {
     proxyType = "EIP-1167";
-    proxyImplementation = extractNonZeroAddress(
-      hex.slice(EIP1167_PREFIX.length, EIP1167_PREFIX.length + 40),
-    );
+    proxyImplementation = extractNonZeroAddress(eip1167Match[1]);
   } else if (eip1967Impl) {
-    proxyType = "EIP-1967";
-    proxyImplementation = eip1967Impl;
+    if (hasDelegationOpcode) {
+      proxyType = "EIP-1967";
+      proxyImplementation = eip1967Impl;
+      proxyAdmin = eip1967Admin;
+    } else {
+      isEip1967Decoy = true;
+    }
   }
 
   // Detect known 4-byte function selectors (byte-aligned).
@@ -323,6 +344,27 @@ export function analyzeBytecodeRisk(
         `Delegates execution via DELEGATECALL (0xf4) (${opcodes.delegatecall}x) as ${proxyType} proxy.`,
       );
     }
+  }
+
+  if (opcodes.callcode > 0) {
+    score += 30;
+    redFlags.push(
+      `Contains deprecated CALLCODE (0xf2) (${opcodes.callcode}x): arbitrary code execution in contract storage context.`,
+    );
+  }
+
+  if (isEip1167Decoy) {
+    score += 25;
+    redFlags.push(
+      "Suspicious decoy EIP-1167 prefix detected: bytecode does not match exact 45-byte canonical EIP-1167 minimal proxy pattern.",
+    );
+  }
+
+  if (isEip1967Decoy) {
+    score += 25;
+    redFlags.push(
+      `Decoy EIP-1967 implementation slot set without DELEGATECALL/CALLCODE (slot points to ${eip1967Impl}): contract is not a standard proxy.`,
+    );
   }
 
   if (proxyType === "EIP-1167") {
@@ -443,6 +485,9 @@ export function mergeProxyAndImplRisk(
     }
     if (implAnalysis.opcodes.delegatecall > 0) {
       score += implAnalysis.proxy_type === "NONE" ? 25 : 15;
+    }
+    if (implAnalysis.opcodes.callcode > 0) {
+      score += 30;
     }
     if (implAnalysis.opcodes.create2 > 0) {
       score += 15;
@@ -579,7 +624,7 @@ export const flareContractSentinel = withX402(
 export function registerSentinelTool(server: McpServer): void {
   server.tool(
     "flare_contract_sentinel",
-    "Static EVM bytecode & proxy risk analyzer for any address on Flare (mainnet, coston2, songbird, coston). Detects EOA vs contract, automatically unwraps EIP-1167/EIP-1967 proxy implementations, scans risky opcodes (SELFDESTRUCT, DELEGATECALL, CREATE2, CREATE, ORIGIN) with PUSH-safe disassembly, detects common function selectors (ERC-20, EIP-3009, Ownable, Pausable, UUPS, Mintable), and returns a 0-100 risk score with red flags.",
+    "Static EVM bytecode & proxy risk analyzer for any address on Flare (mainnet, coston2, songbird, coston). Detects EOA vs contract, automatically unwraps EIP-1167/EIP-1967 proxy implementations, scans risky opcodes (SELFDESTRUCT, DELEGATECALL, CALLCODE, CREATE2, CREATE, ORIGIN) with PUSH-safe disassembly, detects common function selectors (ERC-20, EIP-3009, Ownable, Pausable, UUPS, Mintable), and returns a 0-100 risk score with red flags.",
     flareContractSentinelInput,
     flareContractSentinel,
   );

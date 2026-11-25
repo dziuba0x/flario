@@ -13,40 +13,79 @@ import {
   verifyMarketTruthInput,
   type VerifiedMarketFeed,
 } from "../src/tools/market-truth.js";
+import { anchorFeedLeaf, anchorFeedPrice } from "../src/utils/ftso-da.js";
+import { foldMerkleProof } from "../src/utils/fdc.js";
 
-const ROOT_A =
-  "0x1111111111111111111111111111111111111111111111111111111111111111" as Hex;
 const PROOF_1 =
   "0x2222222222222222222222222222222222222222222222222222222222222222" as Hex;
 const PROOF_2 =
   "0x3333333333333333333333333333333333333333333333333333333333333333" as Hex;
 
+const FLR_FEED_ID = "0x01464c522f55534400000000000000000000000000" as Hex;
+const XRP_FEED_ID = "0x015852502f55534400000000000000000000000000" as Hex;
+const BTC_FEED_ID = "0x014254432f55534400000000000000000000000000" as Hex;
+
+function makeVerifiedFeed(params: {
+  name: string;
+  feed_id: Hex;
+  raw_value: number;
+  decimals: number;
+  turnout_bips: number;
+  voting_round_id: number;
+  proof: Hex[];
+}): VerifiedMarketFeed {
+  const body = {
+    votingRoundId: params.voting_round_id,
+    id: params.feed_id,
+    value: params.raw_value,
+    turnoutBIPS: params.turnout_bips,
+    decimals: params.decimals,
+  };
+  const leaf = anchorFeedLeaf(body);
+  const merkle_root = foldMerkleProof(leaf, params.proof);
+  return {
+    name: params.name,
+    feed_id: params.feed_id,
+    price: anchorFeedPrice(body),
+    raw_value: params.raw_value,
+    decimals: params.decimals,
+    turnout_bips: params.turnout_bips,
+    voting_round_id: params.voting_round_id,
+    merkle_root,
+    proof: params.proof,
+    verified: true,
+  };
+}
+
 function sampleFeeds(): VerifiedMarketFeed[] {
   return [
-    {
+    makeVerifiedFeed({
       name: "FLR/USD",
-      price: 0.0245,
+      feed_id: FLR_FEED_ID,
+      raw_value: 2450,
+      decimals: 5,
+      turnout_bips: 9500,
       voting_round_id: 912345,
-      merkle_root: ROOT_A,
       proof: [PROOF_1, PROOF_2],
-      verified: true,
-    },
-    {
+    }),
+    makeVerifiedFeed({
       name: "XRP/USD",
-      price: 2.41,
+      feed_id: XRP_FEED_ID,
+      raw_value: 241000,
+      decimals: 5,
+      turnout_bips: 9800,
       voting_round_id: 912345,
-      merkle_root: ROOT_A,
       proof: [PROOF_2],
-      verified: true,
-    },
-    {
+    }),
+    makeVerifiedFeed({
       name: "BTC/USD",
-      price: 98500.25,
+      feed_id: BTC_FEED_ID,
+      raw_value: 9850025,
+      decimals: 2,
+      turnout_bips: 9900,
       voting_round_id: 912345,
-      merkle_root: ROOT_A,
       proof: [PROOF_1],
-      verified: true,
-    },
+    }),
   ];
 }
 
@@ -225,9 +264,13 @@ describe("buildMarketTruthCertificate & verifyMarketTruthCertificate", () => {
 
     const noProofFeed: VerifiedMarketFeed = {
       name: "FLR/USD",
+      feed_id: FLR_FEED_ID,
       price: 0.0245,
+      raw_value: 2450,
+      decimals: 5,
+      turnout_bips: 9500,
       voting_round_id: 912345,
-      merkle_root: ROOT_A,
+      merkle_root: PROOF_1,
       proof: [],
       verified: true,
     };
@@ -239,6 +282,53 @@ describe("buildMarketTruthCertificate & verifyMarketTruthCertificate", () => {
     const noProofRes = verifyMarketTruthCertificate(noProofCert);
     expect(noProofRes.valid).toBe(false);
     expect(noProofRes.reason).toContain("proof");
+  });
+
+  it("rejects a forged certificate with recomputed certificate_hash and fake price=1 (Red-Team CRITICAL #1)", () => {
+    const legit = sampleFeeds();
+
+    // Attack A: alter price to 1 and recompute certificate_hash (keeping original raw_value/proof).
+    const forgedPriceOnly = buildMarketTruthCertificate({
+      network: "mainnet",
+      created_at: 1790000000,
+      feeds: legit.map((f, i) => (i === 0 ? { ...f, price: 1 } : f)),
+    });
+    const resA = verifyMarketTruthCertificate(forgedPriceOnly);
+    expect(resA.valid).toBe(false);
+    expect(resA.reason).toContain("does not match raw_value/10^decimals");
+
+    // Attack B: alter BOTH price=1 AND raw_value=100000 (consistent with decimals=5),
+    // keep the real merkle_root + proof, and recompute certificate_hash.
+    const forgedBodyAndPrice = buildMarketTruthCertificate({
+      network: "mainnet",
+      created_at: 1790000000,
+      feeds: legit.map((f, i) =>
+        i === 0 ? { ...f, price: 1, raw_value: 100000 } : f,
+      ),
+    });
+    const resB = verifyMarketTruthCertificate(forgedBodyAndPrice);
+    expect(resB.valid).toBe(false);
+    expect(resB.reason).toContain("Merkle proof does not fold to merkle_root");
+
+    // Attack C: tamper with a Merkle proof sibling and recompute certificate_hash.
+    const forgedProof = buildMarketTruthCertificate({
+      network: "mainnet",
+      created_at: 1790000000,
+      feeds: legit.map((f, i) =>
+        i === 0
+          ? {
+              ...f,
+              proof: [
+                "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" as Hex,
+                ...f.proof.slice(1),
+              ],
+            }
+          : f,
+      ),
+    });
+    const resC = verifyMarketTruthCertificate(forgedProof);
+    expect(resC.valid).toBe(false);
+    expect(resC.reason).toContain("Merkle proof does not fold to merkle_root");
   });
 });
 

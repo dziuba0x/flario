@@ -24,6 +24,7 @@ describe("flare_contract_sentinel: analyzeBytecodeRisk", () => {
       expect(res.opcodes).toEqual({
         selfdestruct: 0,
         delegatecall: 0,
+        callcode: 0,
         create2: 0,
         create: 0,
         origin: 0,
@@ -51,11 +52,11 @@ describe("flare_contract_sentinel: analyzeBytecodeRisk", () => {
     });
   });
 
-  it("does NOT trigger false positives for 0xff/0xf4/0xf5/0xf0/0x32 inside PUSH32 or PUSH1 immediate data", () => {
-    // PUSH32 followed by 32 bytes packed with 0xff, 0xf4, 0xf5, 0xf0, 0x32,
+  it("does NOT trigger false positives for 0xff/0xf4/0xf2/0xf5/0xf0/0x32 inside PUSH32 or PUSH1 immediate data", () => {
+    // PUSH32 followed by 32 bytes packed with 0xff, 0xf4, 0xf2, 0xf5, 0xf0, 0x32,
     // followed by PUSH1 0xff, then STOP (0x00).
     const push32Data =
-      "fff4f5f032fff4f5f032fff4f5f032fff4f5f032fff4f5f032fff4f5f032ffff";
+      "fff4f2f5f032fff4f2f5f032fff4f2f5f032fff4f2f5f032fff4f2f5f032ffff";
     expect(push32Data.length).toBe(64);
     const bytecode = `0x7f${push32Data}60ff00`;
 
@@ -64,6 +65,7 @@ describe("flare_contract_sentinel: analyzeBytecodeRisk", () => {
     expect(res.opcodes).toEqual({
       selfdestruct: 0,
       delegatecall: 0,
+      callcode: 0,
       create2: 0,
       create: 0,
       origin: 0,
@@ -193,6 +195,7 @@ describe("flare_contract_sentinel: analyzeBytecodeRisk", () => {
     expect(res.opcodes).toEqual({
       selfdestruct: 1,
       delegatecall: 1,
+      callcode: 0,
       create2: 1,
       create: 1,
       origin: 1,
@@ -211,6 +214,75 @@ describe("flare_contract_sentinel: analyzeBytecodeRisk", () => {
     expect(flareContractSentinelInput.address).toBeDefined();
     expect(flareContractSentinelInput.network).toBeDefined();
     expect(flareContractSentinelInput.x402_payment).toBeDefined();
+  });
+
+  it("HIGH #5 regression: rejects decoy EIP-1167 prefix spoof with appended DELEGATECALL", () => {
+    const decoyImpl = "1111111111111111111111111111111111111111";
+    const realEvil = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+    // Prefix matches EIP-1167, then POP (0x50) discards decoy address and pushes realEvil + GAS + DELEGATECALL
+    const decoyBytecode = `0x363d3d373d3d3d363d73${decoyImpl}5073${realEvil}5af43d82803e903d91602b57fd5bf3`;
+
+    const res = analyzeBytecodeRisk(decoyBytecode);
+    expect(res.proxy_type).toBe("NONE");
+    expect(res.proxy_implementation).toBeNull();
+    expect(res.opcodes.delegatecall).toBe(1);
+    // 25 (unverified DELEGATECALL) + 25 (decoy EIP-1167 prefix) = 50 -> HIGH
+    expect(res.risk_score).toBe(50);
+    expect(res.risk_level).toBe("HIGH");
+    expect(res.red_flags.some((f) => /decoy EIP-1167/i.test(f))).toBe(true);
+    expect(
+      res.red_flags.some((f) => f.includes("DELEGATECALL") && f.includes("without standard")),
+    ).toBe(true);
+
+    // Even a canonical 45-byte EIP-1167 with a single trailing byte must be rejected as decoy.
+    const trailingByteDecoy = `0x363d3d373d3d3d363d73${decoyImpl}5af43d82803e903d91602b57fd5bf300`;
+    const resTrailing = analyzeBytecodeRisk(trailingByteDecoy);
+    expect(resTrailing.proxy_type).toBe("NONE");
+    expect(resTrailing.proxy_implementation).toBeNull();
+    expect(resTrailing.red_flags.some((f) => /decoy EIP-1167/i.test(f))).toBe(true);
+  });
+
+  it("HIGH #6 regression: flags decoy EIP-1967 implementation slot when shell has no DELEGATECALL/CALLCODE", () => {
+    // Normal contract bytecode without DELEGATECALL (0xf4) or CALLCODE (0xf2)
+    const shellCode = "0x608060405263a9059cbb1400";
+    const decoyImplSlot =
+      "0x000000000000000000000000abcdefabcdefabcdefabcdefabcdefabcdefabcd";
+    const decoyAdminSlot =
+      "0x0000000000000000000000001234567890123456789012345678901234567890";
+
+    const res = analyzeBytecodeRisk(shellCode, {
+      eip1967Impl: decoyImplSlot,
+      eip1967Admin: decoyAdminSlot,
+    });
+
+    expect(res.proxy_type).toBe("NONE");
+    expect(res.proxy_implementation).toBeNull();
+    expect(res.proxy_admin).toBeNull();
+    expect(res.opcodes.delegatecall).toBe(0);
+    expect(res.opcodes.callcode).toBe(0);
+    expect(res.risk_score).toBe(25);
+    expect(res.risk_level).toBe("MEDIUM");
+    expect(
+      res.red_flags.some((f) =>
+        f.includes("Decoy EIP-1967 implementation slot set without DELEGATECALL/CALLCODE"),
+      ),
+    ).toBe(true);
+  });
+
+  it("HIGH #7 regression: detects CALLCODE (0xf2) forwarder and scores it at least as risky as DELEGATECALL", () => {
+    // Minimal forwarder using CALLCODE (0xf2) instead of DELEGATECALL (0xf4)
+    const callcodeForwarder =
+      "0x366000803760008036600073deadbeefdeadbeefdeadbeefdeadbeefdeadbeef5af200";
+
+    const res = analyzeBytecodeRisk(callcodeForwarder);
+    expect(res.is_contract).toBe(true);
+    expect(res.proxy_type).toBe("NONE");
+    expect(res.opcodes.callcode).toBe(1);
+    expect(res.opcodes.delegatecall).toBe(0);
+    expect(res.risk_score).toBeGreaterThanOrEqual(25);
+    expect(res.risk_score).toBe(30);
+    expect(res.risk_level).toBe("MEDIUM");
+    expect(res.red_flags.some((f) => f.includes("CALLCODE (0xf2)"))).toBe(true);
   });
 });
 
@@ -312,6 +384,24 @@ describe("flare_contract_sentinel: mergeProxyAndImplRisk", () => {
     expect(merged.implementation_analysis?.bytecode_bytes).toBe(0);
     expect(
       merged.red_flags.some((f) => f.includes("[Implementation]") && f.includes("no deployed bytecode")),
+    ).toBe(true);
+  });
+
+  it("propagates CALLCODE (0xf2) risk when an implementation behind a proxy uses CALLCODE", () => {
+    const implLower = "1111111111111111111111111111111111111111";
+    const eip1167 = `0x363d3d373d3d3d363d73${implLower}5af43d82803e903d91602b57fd5bf3`;
+    const proxyAnalysis = analyzeBytecodeRisk(eip1167);
+    const implWithCallcode = analyzeBytecodeRisk(
+      "0x366000803760008036600073deadbeefdeadbeefdeadbeefdeadbeefdeadbeef5af200",
+    );
+
+    const merged = mergeProxyAndImplRisk(proxyAnalysis, implWithCallcode);
+    // 25 (EIP-1167) + 30 (CALLCODE) = 55 -> HIGH
+    expect(merged.risk_score).toBe(55);
+    expect(merged.risk_level).toBe("HIGH");
+    expect(merged.implementation_analysis?.opcodes.callcode).toBe(1);
+    expect(
+      merged.red_flags.some((f) => f.includes("[Implementation]") && f.includes("CALLCODE (0xf2)")),
     ).toBe(true);
   });
 });

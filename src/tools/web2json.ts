@@ -60,14 +60,39 @@ function toolResult(data: unknown) {
 // --- source binding (the security core; pure and unit-tested) ---------------
 
 export interface SourceExpectation {
-  /** Hostnames the data may come from, compared exactly, case-insensitively. */
+  /** Hostnames (optionally with explicit :port) the data may come from, compared case-insensitively. */
   hosts: string[];
-  /** Required path prefix, matched with startsWith to stop prefix injection. */
+  /** Required path prefix, matched on a segment boundary to stop prefix injection. */
   path_prefix?: string;
   /** Require https. Default true; only turn this off for local testing. */
   require_https?: boolean;
   /** Require a specific HTTP method. */
   http_method?: string;
+  /** Require an exact match on the attested jq post-processing filter. */
+  post_process_jq?: string;
+  /** Require an exact match on the attested ABI signature JSON string. */
+  abi_signature?: string;
+}
+
+export interface Web2JsonRequestExtras {
+  postProcessJq?: string;
+  abiSignature?: string;
+}
+
+const ENCODED_TRAVERSAL_RE =
+  /(?:%2e%2e|%2e\.|\.%2e|%252e|(?:%2f|%5c|%252f|%255c)\.\.|\.\.(?:%2f|%5c|%252f|%255c))/i;
+
+function hasEncodedPathTraversal(pathname: string): boolean {
+  if (ENCODED_TRAVERSAL_RE.test(pathname)) {
+    return true;
+  }
+  try {
+    const decoded = decodeURIComponent(pathname);
+    const segments = decoded.split(/[/\\]/);
+    return segments.some((seg) => seg === ".." || seg === ".");
+  } catch {
+    return true;
+  }
 }
 
 export interface BindingResult {
@@ -90,6 +115,7 @@ export function bindWeb2JsonSource(
   requestUrl: string,
   httpMethod: string,
   expect: SourceExpectation,
+  extras?: Web2JsonRequestExtras,
 ): BindingResult {
   let parsed: URL;
   try {
@@ -119,21 +145,49 @@ export function bindWeb2JsonSource(
   if (!expect.hosts || expect.hosts.length === 0) {
     return { bound: false, reason: "no expected hosts were given, so the source cannot be bound", parsed: info };
   }
-  const allowed = expect.hosts.map((h) => h.trim().toLowerCase());
-  if (!allowed.includes(info.host)) {
+
+  const defaultPort =
+    parsed.protocol === "https:" ? "443" : parsed.protocol === "http:" ? "80" : "";
+  const normalizeAllowedHost = (raw: string): string => {
+    const trimmed = raw.trim().toLowerCase();
+    if (defaultPort && trimmed.endsWith(`:${defaultPort}`)) {
+      return trimmed.slice(0, -(defaultPort.length + 1));
+    }
+    return trimmed;
+  };
+
+  const actualHostWithPort = parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname;
+  const allowed = expect.hosts.map(normalizeAllowedHost);
+  if (!allowed.includes(actualHostWithPort)) {
     return {
       bound: false,
-      reason: `attested host "${info.host}" is not in the expected list (${allowed.join(", ")})`,
+      reason: `attested host "${actualHostWithPort}" is not in the expected list (${allowed.join(", ")})`,
       parsed: info,
     };
   }
 
-  if (expect.path_prefix !== undefined && !info.path.startsWith(expect.path_prefix)) {
+  const rawPathMatch = requestUrl.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/?#]*([^?#]*)/);
+  const rawPath = rawPathMatch ? rawPathMatch[1] : info.path;
+  if (hasEncodedPathTraversal(rawPath) || hasEncodedPathTraversal(info.path)) {
     return {
       bound: false,
-      reason: `attested path "${info.path}" does not start with the expected prefix "${expect.path_prefix}"`,
+      reason: `attested path "${info.path}" contains encoded path traversal`,
       parsed: info,
     };
+  }
+
+  if (expect.path_prefix !== undefined) {
+    const prefix = expect.path_prefix;
+    const prefixMatches = prefix.endsWith("/")
+      ? info.path.startsWith(prefix)
+      : info.path === prefix || info.path.startsWith(`${prefix}/`);
+    if (!prefixMatches) {
+      return {
+        bound: false,
+        reason: `attested path "${info.path}" does not start with the expected prefix "${prefix}" on a path segment boundary`,
+        parsed: info,
+      };
+    }
   }
 
   if (
@@ -143,6 +197,28 @@ export function bindWeb2JsonSource(
     return {
       bound: false,
       reason: `attested HTTP method "${httpMethod}" does not match the expected "${expect.http_method}"`,
+      parsed: info,
+    };
+  }
+
+  if (
+    expect.post_process_jq !== undefined &&
+    extras?.postProcessJq !== expect.post_process_jq
+  ) {
+    return {
+      bound: false,
+      reason: `attested postProcessJq "${extras?.postProcessJq ?? ""}" does not match expected "${expect.post_process_jq}"`,
+      parsed: info,
+    };
+  }
+
+  if (
+    expect.abi_signature !== undefined &&
+    extras?.abiSignature !== expect.abi_signature
+  ) {
+    return {
+      bound: false,
+      reason: `attested abiSignature "${extras?.abiSignature ?? ""}" does not match expected "${expect.abi_signature}"`,
       parsed: info,
     };
   }
@@ -300,6 +376,8 @@ export const fdcVerifyWeb2JsonInput = {
       path_prefix: z.string().optional(),
       require_https: z.boolean().optional(),
       http_method: z.string().optional(),
+      post_process_jq: z.string().optional(),
+      abi_signature: z.string().optional(),
     })
     .optional()
     .describe(
@@ -336,6 +414,10 @@ export async function fdcVerifyWeb2Json(args: {
         requestBody.url,
         requestBody.httpMethod ?? "GET",
         expect_source,
+        {
+          postProcessJq: requestBody.postProcessJq,
+          abiSignature: requestBody.abiSignature,
+        },
       );
       if (!binding.bound) {
         return toolError(
